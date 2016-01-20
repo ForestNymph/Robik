@@ -12,8 +12,14 @@
 #define IN3 7
 #define IN4 6
 
-// blink led when push the remote button
-#define WHITE_LED 3
+// motion sensor digital pins on expander
+#define MOTION_0 4
+//#define MOTION_1 5
+#define MOTION_2 6
+#define MOTION_3 7
+
+#define WHITE_LED 4
+#define RED_LED 12
 
 // ir received signals from remote
 #define IR_RECEIVER 11
@@ -36,11 +42,13 @@ static int motors_speed = 155;
 static unsigned long signal_code = 0x00000000;
 
 // HCSR501 calibration time in sec.
-// TODO change to 15
-static int calibration_time_HCSR501 = 3;
+static int calibration_time_HCSR501 = 15;
 
 static IRrecv irrecv(IR_RECEIVER);
 static decode_results ir_results;
+
+// digital expander (8 additional digital pins outside of board)
+static PCF8574 expander;
 
 // struct describes HCSR501 motion sensors
 struct motion_sensor {
@@ -62,10 +70,10 @@ struct motion_sensor {
 };
 
 // initalize motion sensors
-static struct motion_sensor motion_nr0 = motion_sensor(0, 12);
-// struct motion_sensor motion_nr1(1, 0);
-static struct motion_sensor motion_nr2(2, 4);
-static struct motion_sensor motion_nr3(3, 13);
+static struct motion_sensor motion_nr0(0, MOTION_0);
+// static struct motion_sensor motion_nr1(1, MOTION_1);
+static struct motion_sensor motion_nr2(2, MOTION_2);
+static struct motion_sensor motion_nr3(3, MOTION_3);
 
 static void start_motors(int, int, int, int, int);
 static void check_IR_signal();
@@ -85,17 +93,23 @@ void setup() {
   pinMode(IN3, OUTPUT);
   pinMode(IN4, OUTPUT);
 
+  // white led mode
+  pinMode(WHITE_LED, OUTPUT);
+  digitalWrite(WHITE_LED, LOW);
+  pinMode(RED_LED, OUTPUT);
+  digitalWrite(RED_LED, LOW);
+
   // start the IR receiver
   irrecv.enableIRIn();
 
-  // white led mode
-  pinMode(WHITE_LED, OUTPUT);
+  // set expander on 0x20 adress, all bits on low state (pins to GND)
+  // 0 1 0 0 A2 A1 A0 - (Ax) can be modify
+  // lowest adress 0x20, highest 0x27 (32-39)
+  // 8 different adresses can be set
+  expander.begin(0x20);
 
   // HCSR501 calibration
-  calibrate_motion_sensor(motion_nr0.pin_sensor);
-  // calibrate_motion_sensor(motion_nr1.pin_sensor);
-  calibrate_motion_sensor(motion_nr2.pin_sensor);
-  calibrate_motion_sensor(motion_nr3.pin_sensor);
+  calibrate_motion_sensor();
 
   // create dependencies between the sensors
   motion_nr0.set_chain(&motion_nr3, &motion_nr2);
@@ -122,21 +136,20 @@ void loop() {
     // take next value
     irrecv.resume();
   }
-
   // get first sensor
   motion_sensor *element = &motion_nr0;
   // check status of related sensors and find 2 of them HIGH
   // check status of the of sensors and stop
-  // when return to the first one again
-  while (element->next->ID_sensor != 3) {
-    // if (motion_detected((*element).pin_sensor) &&
-    // motion_detected((*(*element).next).pin_sensor)
-    {
-
-      Serial.println((*(*element).next).ID_sensor);
+  // when return to the first one - again
+  do {
+    if (motion_detected((*element).pin_sensor) &&
+        motion_detected((*(*element).next).pin_sensor)) {
+          // turn there
+          // break;
+          // Serial.println((*(*element).next).ID_sensor);
     }
-    element = element->next;
-  }
+    element = (*element).next;
+  } while (element->prev->ID_sensor != 3);
 }
 
 static void check_IR_signal() {
@@ -173,9 +186,9 @@ static void check_IR_signal() {
 }
 
 static void blink_white_led() {
-  digitalWrite(3, HIGH);
+  digitalWrite(WHITE_LED, HIGH);
   delay(100);
-  digitalWrite(3, LOW);
+  digitalWrite(WHITE_LED, LOW);
   delay(100);
 }
 
@@ -228,16 +241,26 @@ static void slower_motors() {
 }
 
 // calibrate HCSR501 sensor
-static void calibrate_motion_sensor(int sensor_pin) {
-  pinMode(sensor_pin, INPUT);
-  digitalWrite(sensor_pin, LOW);
+// set INPUT mode for digtal pins on expander
+static void calibrate_motion_sensor() {
+  digitalWrite(RED_LED, HIGH);
+  expander.pinMode(MOTION_0, INPUT);
+  //expander.pinMode(MOTION_1, INPUT);
+  expander.pinMode(MOTION_2, INPUT);
+  expander.pinMode(MOTION_3, INPUT);
+  //expander.digitalWrite(sensor_pin, LOW);
+  // all pins disable the internal pullup on the input pin
+  //http://forum.arduino.cc/index.php?topic=5313.0
+  expander.write(LOW);
   for (int i = 0; i < calibration_time_HCSR501; ++i) {
     delay(1000);
   }
+  digitalWrite(RED_LED, LOW);
 }
 
+// if motion is detected return HIGH state
 static bool motion_detected(int sensor_pin) {
-  int val = digitalRead(sensor_pin);
+  int val = expander.digitalRead(sensor_pin);
   if (val == LOW) {
     return false;
   } else {

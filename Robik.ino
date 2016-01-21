@@ -1,8 +1,10 @@
 #include "IRremote.h"
+// PCF8574 bug library.
+// 2 and 3 digital pin under-voltage issue
 #include "PCF8574.h"
 #include "Wire.h"
 
-#define debug false
+#define debug true
 
 // motor controller digital pins
 #define LEFT_ENGINE_SPEED 10
@@ -13,8 +15,13 @@
 #define IN4 6
 
 // motion sensor digital pins on expander
+// hardware configuration HCSR501:
+// TIME DELAY potentiometer anticlockwise rotation
+// to reduced time delay (0.5s)
+// DISTANCE potentiometer anticlockwise rotation
+// to decrease distance (3 m)
 #define MOTION_0 4
-//#define MOTION_1 5
+#define MOTION_1 5
 #define MOTION_2 6
 #define MOTION_3 7
 
@@ -42,7 +49,7 @@ static int motors_speed = 155;
 static unsigned long signal_code = 0x00000000;
 
 // HCSR501 calibration time in sec.
-static int calibration_time_HCSR501 = 15;
+static int calibration_time_HCSR501 = 3;
 
 static IRrecv irrecv(IR_RECEIVER);
 static decode_results ir_results;
@@ -71,18 +78,21 @@ struct motion_sensor {
 
 // initalize motion sensors
 static struct motion_sensor motion_nr0(0, MOTION_0);
-// static struct motion_sensor motion_nr1(1, MOTION_1);
+static struct motion_sensor motion_nr1(1, MOTION_1);
 static struct motion_sensor motion_nr2(2, MOTION_2);
 static struct motion_sensor motion_nr3(3, MOTION_3);
 
-static void start_motors(int, int, int, int, int);
+static void detect_IR_signal();
 static void check_IR_signal();
 static void blink_white_led();
+static void start_motors(int, int, int, int, int);
 static void stop_motors();
 static void faster_motors();
 static void slower_motors();
 static void calibrate_motion_sensor(int);
+static void detect_motion();
 static bool motion_detected(int);
+static void turn_to_motion_direction(int, bool);
 
 void setup() {
   // motors pin mode
@@ -112,9 +122,9 @@ void setup() {
   calibrate_motion_sensor();
 
   // create dependencies between the sensors
-  motion_nr0.set_chain(&motion_nr3, &motion_nr2);
-  // motion_nr1.set_chain(&motion_nr0, &motion_nr2);
-  motion_nr2.set_chain(&motion_nr0, &motion_nr3);
+  motion_nr0.set_chain(&motion_nr3, &motion_nr1);
+  motion_nr1.set_chain(&motion_nr0, &motion_nr2);
+  motion_nr2.set_chain(&motion_nr1, &motion_nr3);
   motion_nr3.set_chain(&motion_nr2, &motion_nr0);
 
   if (debug) {
@@ -127,6 +137,11 @@ void setup() {
 }
 
 void loop() {
+  detect_IR_signal();
+  detect_motion();
+}
+
+static void detect_IR_signal() {
   // when IR signal received
   if (irrecv.decode(&ir_results)) {
     if (debug) {
@@ -136,20 +151,6 @@ void loop() {
     // take next value
     irrecv.resume();
   }
-  // get first sensor
-  motion_sensor *element = &motion_nr0;
-  // check status of related sensors and find 2 of them HIGH
-  // check status of the of sensors and stop
-  // when return to the first one - again
-  do {
-    if (motion_detected((*element).pin_sensor) &&
-        motion_detected((*(*element).next).pin_sensor)) {
-          // turn there
-          // break;
-          // Serial.println((*(*element).next).ID_sensor);
-    }
-    element = (*element).next;
-  } while (element->prev->ID_sensor != 3);
 }
 
 static void check_IR_signal() {
@@ -245,17 +246,62 @@ static void slower_motors() {
 static void calibrate_motion_sensor() {
   digitalWrite(RED_LED, HIGH);
   expander.pinMode(MOTION_0, INPUT);
-  //expander.pinMode(MOTION_1, INPUT);
+  expander.pinMode(MOTION_1, INPUT);
   expander.pinMode(MOTION_2, INPUT);
   expander.pinMode(MOTION_3, INPUT);
-  //expander.digitalWrite(sensor_pin, LOW);
+  // expander.digitalWrite(MOTION_0, LOW);
   // all pins disable the internal pullup on the input pin
-  //http://forum.arduino.cc/index.php?topic=5313.0
+  // http://forum.arduino.cc/index.php?topic=5313.0
+  // do nothing? Only disable internal pullup but
+  // this is not pull down
   expander.write(LOW);
   for (int i = 0; i < calibration_time_HCSR501; ++i) {
     delay(1000);
   }
   digitalWrite(RED_LED, LOW);
+}
+
+static void detect_motion() {
+  // get first sensor
+  motion_sensor *element = &motion_nr0;
+  // check status of related sensors and find 2 of them HIGH
+  // check status of the of sensors and stop
+  // when checking return to the first one
+  do {
+    // if motion detected by two of the sensors
+    if (motion_detected((*element).pin_sensor) &&
+        motion_detected((*(*element).next).pin_sensor)) {
+      turn_to_motion_direction((*element).ID_sensor, true);
+      if (debug) {
+        Serial.println("Motion detected both sides!");
+        Serial.println((*element).ID_sensor);
+        Serial.println((*(*element).next).ID_sensor);
+      }
+      // if motion detected by one of the sensors
+    } else if (motion_detected((*element).pin_sensor)) {
+      turn_to_motion_direction((*element).ID_sensor, false);
+    }
+    element = (*element).next;
+  } while ((*(*element).prev).ID_sensor != 3);
+
+  delay(800);
+
+  if (debug) {
+    if (motion_detected(MOTION_0)) {
+      Serial.println("Motion detected 0");
+    }
+    else if (motion_detected(MOTION_1)) {
+      Serial.println("Motion detected 1");
+    }
+    else if (motion_detected(MOTION_2)) {
+      Serial.println("Motion detected 2");
+    }
+    else if (motion_detected(MOTION_3)) {
+      Serial.println("Motion detected 3");
+    } else {
+      Serial.println("No Motion!");
+    }
+  }
 }
 
 // if motion is detected return HIGH state
@@ -268,4 +314,44 @@ static bool motion_detected(int sensor_pin) {
   }
 }
 
-
+// Bad practice. Hardcoded rotation angle
+// Encoders needed
+static void turn_to_motion_direction(int pin, bool between) {
+  if (pin == 0) {
+    if (between) { // between 0 and 1
+      start_motors(LOW, HIGH, HIGH, LOW, 180);
+      delay(250);
+    } else {
+      // move detected in front of Robik, don't turn around
+    }
+  } else if (pin == 1) {
+    if (between) { // between 1 and 2
+      start_motors(LOW, HIGH, HIGH, LOW, 180);
+      delay(750);
+    } else {
+      start_motors(LOW, HIGH, HIGH, LOW, 180);
+      delay(500);
+    }
+  } else if (pin == 2) {
+    if (between) { // between 2 and 3
+      start_motors(HIGH, LOW, LOW, HIGH, 180);
+      delay(750);
+    } else {
+      start_motors(LOW, HIGH, HIGH, LOW, 180);
+      delay(1000);
+    }
+  } else if (pin == 3) {
+    if (between) { // between 3 and 0
+      start_motors(HIGH, LOW, LOW, HIGH, 180);
+      delay(250);
+    } else {
+      start_motors(HIGH, LOW, LOW, HIGH, 180);
+      delay(500);
+    }
+  }
+  stop_motors();
+  start_motors(LOW, HIGH, LOW, HIGH, 180);
+  delay(1500);
+  stop_motors();
+  delay(1600);
+}

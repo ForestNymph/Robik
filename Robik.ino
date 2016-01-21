@@ -1,5 +1,5 @@
 #include "IRremote.h"
-// PCF8574 bug library.
+// PCF8574 bug in library.
 // 2 and 3 digital pin under-voltage issue
 #include "PCF8574.h"
 #include "Wire.h"
@@ -325,11 +325,10 @@ static void turn_to_motion_direction(int pin, bool between) {
       // move detected in front of Robik, don't turn around
     }
   } else if (pin == 1) {
+    start_motors(LOW, HIGH, HIGH, LOW, 180);
     if (between) { // between 1 and 2
-      start_motors(LOW, HIGH, HIGH, LOW, 180);
       delay(750);
     } else {
-      start_motors(LOW, HIGH, HIGH, LOW, 180);
       delay(500);
     }
   } else if (pin == 2) {
@@ -341,17 +340,16 @@ static void turn_to_motion_direction(int pin, bool between) {
       delay(1000);
     }
   } else if (pin == 3) {
+    start_motors(HIGH, LOW, LOW, HIGH, 180);
     if (between) { // between 3 and 0
-      start_motors(HIGH, LOW, LOW, HIGH, 180);
       delay(250);
     } else {
-      start_motors(HIGH, LOW, LOW, HIGH, 180);
       delay(500);
     }
   }
   stop_motors();
-  start_motors(LOW, HIGH, LOW, HIGH, 180);
+  //start_motors(LOW, HIGH, LOW, HIGH, 180);
   delay(1500);
-  stop_motors();
+  //stop_motors();
   delay(1600);
 }

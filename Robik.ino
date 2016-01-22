@@ -6,6 +6,8 @@
 
 #define debug true
 
+///////// MICRO DC GEARED MOTOR (BACK SHAFT) /////////
+
 // motor controller digital pins
 #define LEFT_ENGINE_SPEED 10
 #define RIGHT_ENGINE_SPEED 5
@@ -14,22 +16,15 @@
 #define IN3 7
 #define IN4 6
 
-// motion sensor digital pins on expander
-// hardware configuration HCSR501:
-// TIME DELAY potentiometer anticlockwise rotation
-// to reduced time delay (0.5s)
-// DISTANCE potentiometer anticlockwise rotation
-// to decrease distance (3 m)
-#define MOTION_0 4
-#define MOTION_1 5
-#define MOTION_2 6
-#define MOTION_3 7
+// current motors speed
+static int motors_speed = 155;
+
+///////// WHITE/RED LED /////////
 
 #define WHITE_LED 4
 #define RED_LED 12
 
-// ir received signals from remote
-#define IR_RECEIVER 11
+///////// HEX CODED TV REMOTE SIGNALS /////////
 
 // tv remote hex signals
 const unsigned long tv_up = 0xE0E006F9;
@@ -42,20 +37,39 @@ const unsigned long tv_stop_engines = 0xE0E016E9;
 const unsigned long tv_faster = 0xE0E0E01F;
 const unsigned long tv_slower = 0xE0E0D02F;
 
-// current motors speed
-static int motors_speed = 155;
-
 // current signal code
 static unsigned long signal_code = 0x00000000;
 
+///////// ENCODERS DAGU RS030 /////////
+
+#define LEFT_ENCODER 3 // interrupt 0
+#define RIGHT_ENCODER 2 // interrupt 1
+// width of pulse (ms)
+static int motor_time = 120;
+// width of left encoder pulses (ms)
+static volatile unsigned long left_pulse = 121;
+// width of right encoder pulses (ms)
+static volatile unsigned long right_pulse = 121;
+// remembers time of left  encoders last state change in mS
+static volatile unsigned long left_time;
+// remembers time of right encoders last state change in mS
+static volatile unsigned long right_time;
+
+///////// MOTION SENSOR HCSR501 /////////
+
+// motion sensor digital pins on expander
+// hardware configuration HCSR501:
+// TIME DELAY potentiometer anticlockwise rotation
+// to reduced time delay (0.5s)
+// DISTANCE potentiometer anticlockwise rotation
+// to decrease distance (3 m)
+#define MOTION_0 4
+#define MOTION_1 5
+#define MOTION_2 6
+#define MOTION_3 7
+
 // HCSR501 calibration time in sec.
 static int calibration_time_HCSR501 = 3;
-
-static IRrecv irrecv(IR_RECEIVER);
-static decode_results ir_results;
-
-// digital expander (8 additional digital pins outside of board)
-static PCF8574 expander;
 
 // struct describes HCSR501 motion sensors
 struct motion_sensor {
@@ -68,7 +82,6 @@ struct motion_sensor {
     ID_sensor = id;
     pin_sensor = pin;
   }
-
   void set_chain(struct motion_sensor *p,
                  struct motion_sensor *n) {
     prev = p;
@@ -82,26 +95,80 @@ static struct motion_sensor motion_nr1(1, MOTION_1);
 static struct motion_sensor motion_nr2(2, MOTION_2);
 static struct motion_sensor motion_nr3(3, MOTION_3);
 
+///////// INFRARED RECEIVER 1838T (38 KHz) /////////
+
+// ir received signals from remote
+#define IR_RECEIVER 11
+static IRrecv irrecv(IR_RECEIVER);
+static decode_results ir_results;
+
+///////// DISTANCE SENSOR HC-SR04 /////////
+///                TODO                 ///
+///////////////////////////////////////////
+
+///////// EXPANDER PCF8574 /////////
+
+// digital expander
+// (8 additional digital pins outside of board)
+static PCF8574 expander;
+
+///////// FUNCTIONS /////////
+
 static void detect_IR_signal();
 static void check_IR_signal();
 static void blink_white_led();
 static void start_motors(int, int, int, int, int);
 static void stop_motors();
-static void faster_motors();
-static void slower_motors();
+static void boost_speed();
+static void reduce_speed();
+static void interrupt_left_encoder();
+static void interrupt_right_encoder();
 static void calibrate_motion_sensor(int);
 static void detect_motion();
 static bool motion_detected(int);
 static void turn_to_motion_direction(int, bool);
 
 void setup() {
+  // set expander on 0x20 adress, all bits on low state (pins to GND)
+  // 0 1 0 0 A2 A1 A0 - (Ax) can be modify
+  // lowest adress 0x20, highest 0x27 (32-39)
+  // 8 different adresses can be set
+  expander.begin(0x20);
+
   // motors pin mode
+  // don't need set pin mode as OUTPUT before calling analogWrite()  
   pinMode(LEFT_ENGINE_SPEED, OUTPUT);
   pinMode(RIGHT_ENGINE_SPEED, OUTPUT);
   pinMode(IN1, OUTPUT);
   pinMode(IN2, OUTPUT);
   pinMode(IN3, OUTPUT);
   pinMode(IN4, OUTPUT);
+  analogWrite(LEFT_ENGINE_SPEED, 0);
+  analogWrite(RIGHT_ENGINE_SPEED, 0);
+
+  // encoders pin mode
+  // don't need directly set up pins as INPUT
+  // because it is a default mode
+  // pull up internal resistors ON
+  pinMode(LEFT_ENCODER, INPUT);
+  digitalWrite(LEFT_ENCODER, HIGH);
+  pinMode(RIGHT_ENCODER, INPUT);
+  digitalWrite(RIGHT_ENCODER, HIGH);
+  // Pins to External Interrupts in Arduino YUN:
+  // 3 (interrupt 0),
+  // 2 (interrupt 1),
+  // 0 (interrupt 2), (not recommended)
+  // 1 (interrupt 3), (not recommended)
+  // 7 (interrupt 4).
+  // These pins can be configured to trigger
+  // an interrupt on a low value, a rising or
+  // falling edge, or a change in value.
+  // Is not recommended to use pins 0 and 1 as interrupts
+  // because they are the also
+  // the hardware serial port used to talk
+  // with the Linux processor.
+  attachInterrupt(digitalPinToInterrupt(3), interrupt_right_encoder, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(2), interrupt_left_encoder, CHANGE);
 
   // white led mode
   pinMode(WHITE_LED, OUTPUT);
@@ -111,12 +178,6 @@ void setup() {
 
   // start the IR receiver
   irrecv.enableIRIn();
-
-  // set expander on 0x20 adress, all bits on low state (pins to GND)
-  // 0 1 0 0 A2 A1 A0 - (Ax) can be modify
-  // lowest adress 0x20, highest 0x27 (32-39)
-  // 8 different adresses can be set
-  expander.begin(0x20);
 
   // HCSR501 calibration
   calibrate_motion_sensor();
@@ -137,7 +198,10 @@ void setup() {
 }
 
 void loop() {
-  detect_IR_signal();
+  // uncomment when use Robik with remote only
+  // and comment detect_motion() function
+  // detect_IR_signal();
+
   detect_motion();
 }
 
@@ -178,9 +242,9 @@ static void check_IR_signal() {
       blink_white_led();
       stop_motors();
     } else if (signal_code == tv_faster) {
-      faster_motors();
+      boost_speed();
     } else if (signal_code == tv_slower) {
-      slower_motors();
+      reduce_speed();
     }
     signal_code = 0x0000000;
   }
@@ -213,7 +277,7 @@ static void stop_motors() {
   digitalWrite(IN4, LOW);
 }
 
-static void faster_motors() {
+static void boost_speed() {
   // usable range 35 - 255;
   // change of 20
   if ((motors_speed + 20) > 255) {
@@ -227,7 +291,7 @@ static void faster_motors() {
   }
 }
 
-static void slower_motors() {
+static void reduce_speed() {
   // usable range 35 - 255
   // change of 20
   if ((motors_speed - 20) < 35) {
@@ -353,3 +417,5 @@ static void turn_to_motion_direction(int pin, bool between) {
   //stop_motors();
   delay(1600);
 }
+
+

@@ -6,23 +6,32 @@
 
 #define debug true
 
+#define runEvery(t) for (static typeof(t) last_time; (typeof(t))millis() - last_time >= (t); last_time += (t))
+
 ///////// MICRO DC GEARED MOTOR (BACK SHAFT) /////////
 
 // motor controller digital pins
 #define LEFT_ENGINE_SPEED 10
 #define RIGHT_ENGINE_SPEED 5
-#define IN1 9
-#define IN2 8
-#define IN3 7
-#define IN4 6
+#define IN1 9 // left
+#define IN2 8 // left
+#define IN3 7 // right
+#define IN4 6 // right
 
 // current motors speed
 static int motors_speed = 155;
+
+static void start_motors(int, int, int, int, int);
+static void stop_motors();
+static void boost_speed();
+static void reduce_speed();
 
 ///////// WHITE/RED LED /////////
 
 #define WHITE_LED 4
 #define RED_LED 12
+
+static void blink_white_led();
 
 ///////// HEX CODED TV REMOTE SIGNALS /////////
 
@@ -42,18 +51,15 @@ static unsigned long signal_code = 0x00000000;
 
 ///////// ENCODERS DAGU RS030 /////////
 
-#define LEFT_ENCODER 3 // interrupt 0
-#define RIGHT_ENCODER 2 // interrupt 1
-// width of pulse (ms)
-static int motor_time = 120;
-// width of left encoder pulses (ms)
-static volatile unsigned long left_pulse = 121;
-// width of right encoder pulses (ms)
-static volatile unsigned long right_pulse = 121;
-// remembers time of left  encoders last state change in mS
-static volatile unsigned long left_time;
-// remembers time of right encoders last state change in mS
-static volatile unsigned long right_time;
+#define LEFT_ENCODER 3
+#define RIGHT_ENCODER 2
+
+static volatile unsigned int right_encoder_count = 0;
+static volatile unsigned int left_encoder_count = 0;
+
+static void turn(int);
+static void right_encoder_callback();
+static void left_encoder_callback();
 
 ///////// MOTION SENSOR HCSR501 /////////
 
@@ -95,12 +101,20 @@ static struct motion_sensor motion_nr1(1, MOTION_1);
 static struct motion_sensor motion_nr2(2, MOTION_2);
 static struct motion_sensor motion_nr3(3, MOTION_3);
 
+static void calibrate_motion_sensor(int);
+static void detect_motion();
+static bool motion_detected(int);
+static void turn_to_motion_direction(int, bool);
+
 ///////// INFRARED RECEIVER 1838T (38 KHz) /////////
 
 // ir received signals from remote
 #define IR_RECEIVER 11
 static IRrecv irrecv(IR_RECEIVER);
 static decode_results ir_results;
+
+static void detect_IR_signal();
+static void check_IR_signal();
 
 ///////// DISTANCE SENSOR HC-SR04 /////////
 ///                TODO                 ///
@@ -112,22 +126,6 @@ static decode_results ir_results;
 // (8 additional digital pins outside of board)
 static PCF8574 expander;
 
-///////// FUNCTIONS /////////
-
-static void detect_IR_signal();
-static void check_IR_signal();
-static void blink_white_led();
-static void start_motors(int, int, int, int, int);
-static void stop_motors();
-static void boost_speed();
-static void reduce_speed();
-static void interrupt_left_encoder();
-static void interrupt_right_encoder();
-static void calibrate_motion_sensor(int);
-static void detect_motion();
-static bool motion_detected(int);
-static void turn_to_motion_direction(int, bool);
-
 void setup() {
   // set expander on 0x20 adress, all bits on low state (pins to GND)
   // 0 1 0 0 A2 A1 A0 - (Ax) can be modify
@@ -136,7 +134,7 @@ void setup() {
   expander.begin(0x20);
 
   // motors pin mode
-  // don't need set pin mode as OUTPUT before calling analogWrite()  
+  // don't need set pin mode as OUTPUT before calling analogWrite()
   pinMode(LEFT_ENGINE_SPEED, OUTPUT);
   pinMode(RIGHT_ENGINE_SPEED, OUTPUT);
   pinMode(IN1, OUTPUT);
@@ -147,12 +145,11 @@ void setup() {
   analogWrite(RIGHT_ENGINE_SPEED, 0);
 
   // encoders pin mode
-  // don't need directly set up pins as INPUT
-  // because it is a default mode
-  // pull up internal resistors ON
-  pinMode(LEFT_ENCODER, INPUT);
+  // internal pull up resistors ON (20-50kOhm)
+  // needed to eliminate interference on pins
+  pinMode(LEFT_ENCODER, INPUT_PULLUP);
   digitalWrite(LEFT_ENCODER, HIGH);
-  pinMode(RIGHT_ENCODER, INPUT);
+  pinMode(RIGHT_ENCODER, INPUT_PULLUP);
   digitalWrite(RIGHT_ENCODER, HIGH);
   // Pins to External Interrupts in Arduino YUN:
   // 3 (interrupt 0),
@@ -167,8 +164,8 @@ void setup() {
   // because they are the also
   // the hardware serial port used to talk
   // with the Linux processor.
-  attachInterrupt(digitalPinToInterrupt(3), interrupt_right_encoder, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(2), interrupt_left_encoder, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(RIGHT_ENCODER), right_encoder_callback, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(LEFT_ENCODER), left_encoder_callback, CHANGE);
 
   // white led mode
   pinMode(WHITE_LED, OUTPUT);
@@ -305,6 +302,23 @@ static void reduce_speed() {
   }
 }
 
+static void turn(int number_encoder_pulses) {
+  right_encoder_count = 0;
+  left_encoder_count = 0;
+  while (left_encoder_count < number_encoder_pulses
+         || right_encoder_count < number_encoder_pulses) {}
+
+  stop_motors();
+}
+
+static void right_encoder_callback() {
+  right_encoder_count += 1;
+}
+
+static void left_encoder_callback() {
+  left_encoder_count += 1;
+}
+
 // calibrate HCSR501 sensor
 // set INPUT mode for digtal pins on expander
 static void calibrate_motion_sensor() {
@@ -417,5 +431,6 @@ static void turn_to_motion_direction(int pin, bool between) {
   //stop_motors();
   delay(1600);
 }
+
 
 

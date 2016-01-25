@@ -6,9 +6,9 @@
 
 #define debug true
 
-#define runEvery(t) for (static typeof(t) last_time; (typeof(t))millis() - last_time >= (t); last_time += (t))
+// #define runEvery(t) for (static typeof(t) last_time; (typeof(t))millis() - last_time >= (t); last_time += (t))
 
-///////// MICRO DC GEARED MOTOR (BACK SHAFT) /////////
+///////// L298 MOTOR DRIVER /////////
 
 // motor controller digital pins
 #define LEFT_ENGINE_SPEED 10
@@ -51,15 +51,12 @@ static unsigned long signal_code = 0x00000000;
 
 ///////// ENCODERS DAGU RS030 /////////
 
-#define LEFT_ENCODER 3
-#define RIGHT_ENCODER 2
+#define ENCODER_WHEEL 2
 
-static volatile unsigned int right_encoder_count = 0;
-static volatile unsigned int left_encoder_count = 0;
+static volatile unsigned long encoder_turn_count = 0;
 
 static void turn(int);
-static void right_encoder_callback();
-static void left_encoder_callback();
+static void encoder_callback();
 
 ///////// MOTION SENSOR HCSR501 /////////
 
@@ -75,7 +72,7 @@ static void left_encoder_callback();
 #define MOTION_3 7
 
 // HCSR501 calibration time in sec.
-static int calibration_time_HCSR501 = 3;
+static int calibration_time_HCSR501 = 15;
 
 // struct describes HCSR501 motion sensors
 struct motion_sensor {
@@ -133,6 +130,12 @@ void setup() {
   // 8 different adresses can be set
   expander.begin(0x20);
 
+  // led mode
+  pinMode(WHITE_LED, OUTPUT);
+  digitalWrite(WHITE_LED, LOW);
+  pinMode(RED_LED, OUTPUT);
+  digitalWrite(RED_LED, LOW);
+
   // motors pin mode
   // don't need set pin mode as OUTPUT before calling analogWrite()
   pinMode(LEFT_ENGINE_SPEED, OUTPUT);
@@ -147,10 +150,8 @@ void setup() {
   // encoders pin mode
   // internal pull up resistors ON (20-50kOhm)
   // needed to eliminate interference on pins
-  pinMode(LEFT_ENCODER, INPUT_PULLUP);
-  digitalWrite(LEFT_ENCODER, HIGH);
-  pinMode(RIGHT_ENCODER, INPUT_PULLUP);
-  digitalWrite(RIGHT_ENCODER, HIGH);
+  pinMode(ENCODER_WHEEL, INPUT_PULLUP);
+  digitalWrite(ENCODER_WHEEL, HIGH);
   // Pins to External Interrupts in Arduino YUN:
   // 3 (interrupt 0),
   // 2 (interrupt 1),
@@ -164,14 +165,7 @@ void setup() {
   // because they are the also
   // the hardware serial port used to talk
   // with the Linux processor.
-  attachInterrupt(digitalPinToInterrupt(RIGHT_ENCODER), right_encoder_callback, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(LEFT_ENCODER), left_encoder_callback, CHANGE);
-
-  // white led mode
-  pinMode(WHITE_LED, OUTPUT);
-  digitalWrite(WHITE_LED, LOW);
-  pinMode(RED_LED, OUTPUT);
-  digitalWrite(RED_LED, LOW);
+ // attachInterrupt(digitalPinToInterrupt(ENCODER_WHEEL), encoder_callback, CHANGE);
 
   // start the IR receiver
   irrecv.enableIRIn();
@@ -272,6 +266,8 @@ static void stop_motors() {
   digitalWrite(IN2, LOW);
   digitalWrite(IN3, LOW);
   digitalWrite(IN4, LOW);
+  analogWrite(LEFT_ENGINE_SPEED, HIGH);
+  analogWrite(LEFT_ENGINE_SPEED, HIGH);
 }
 
 static void boost_speed() {
@@ -302,21 +298,47 @@ static void reduce_speed() {
   }
 }
 
+volatile unsigned int old_state;
+volatile unsigned int new_state = digitalRead(ENCODER_WHEEL);
+volatile unsigned int state_counter = 0;
+volatile unsigned long sum_interrupt = 0;
+
 static void turn(int number_encoder_pulses) {
-  right_encoder_count = 0;
-  left_encoder_count = 0;
-  while (left_encoder_count < number_encoder_pulses
-         || right_encoder_count < number_encoder_pulses) {}
 
+  encoder_turn_count = 0;
+  start_motors(LOW, HIGH, LOW, HIGH, 80);
+
+  state_counter = 0;
+  old_state = digitalRead(ENCODER_WHEEL);
+
+  while (encoder_turn_count < number_encoder_pulses) {
+    noInterrupts();
+    new_state = digitalRead(ENCODER_WHEEL);
+    if (new_state == old_state) {
+      ++state_counter;
+    } else {
+      Serial.print("1/8 PART TURN: ");
+      Serial.println(encoder_turn_count);
+      Serial.print("STATE: ");
+      Serial.println(old_state);
+      Serial.print("COUNT: ");
+      Serial.println(state_counter);
+      sum_interrupt += state_counter;
+      state_counter = 0;
+    }
+    old_state = new_state;
+    interrupts();
+  }
+  Serial.println(encoder_turn_count);
   stop_motors();
+  Serial.print("SUM: ");
+  Serial.println(sum_interrupt);
+  sum_interrupt = 0;
+  delay(5000);
 }
 
-static void right_encoder_callback() {
-  right_encoder_count += 1;
-}
-
-static void left_encoder_callback() {
-  left_encoder_count += 1;
+static void encoder_callback() {
+  encoder_turn_count += 1;
 }
 
 // calibrate HCSR501 sensor
@@ -327,7 +349,6 @@ static void calibrate_motion_sensor() {
   expander.pinMode(MOTION_1, INPUT);
   expander.pinMode(MOTION_2, INPUT);
   expander.pinMode(MOTION_3, INPUT);
-  // expander.digitalWrite(MOTION_0, LOW);
   // all pins disable the internal pullup on the input pin
   // http://forum.arduino.cc/index.php?topic=5313.0
   // do nothing? Only disable internal pullup but

@@ -8,7 +8,7 @@
 
 // #define runEvery(t) for (static typeof(t) last_time; (typeof(t))millis() - last_time >= (t); last_time += (t))
 
-///////// L298 MOTOR DRIVER /////////
+///////// L298 MOTOR DRIVER //////////////////
 
 // motor controller digital pins
 #define LEFT_ENGINE_SPEED 10
@@ -21,19 +21,69 @@
 // current motors speed
 static int motors_speed = 155;
 
-static void start_motors(int, int, int, int, int);
-static void stop_motors();
+// struct describes full config of engines
+// configuration of speed and motors direction
+struct motors_config {
+
+  byte in1;
+  byte in2;
+  byte in3;
+  byte in4;
+  int speed1;
+  int speed2;
+
+  motors_config() {};
+
+  motors_config(byte l1, byte l2, byte r1, byte r2,
+                int speed_l, int speed_r) {
+
+    in1 = l1;
+    in2 = l2;
+    in3 = r1;
+    in4 = r2;
+
+    speed1 = speed_l;
+    speed2 = speed_r;
+  }
+  motors_config(byte l1, byte l2, byte r1, byte r2,
+                int speed_lr) {
+
+    in1 = l1;
+    in2 = l2;
+    in3 = r1;
+    in4 = r2;
+
+    speed1 = speed_lr;
+    speed2 = speed_lr;
+  }
+};
+
+static void run_motors(motors_config);
 static void boost_speed();
 static void reduce_speed();
 
-///////// WHITE/RED LED /////////
+// initialize 5 capabilities for motors config
+// (forward, backward, left, right, stop)
+static motors_config m_forward =
+  motors_config(HIGH, LOW, HIGH, LOW, motors_speed);
+static motors_config m_backward =
+  motors_config(LOW, HIGH, LOW, HIGH, motors_speed);
+static motors_config m_left =
+  motors_config(LOW, HIGH, HIGH, LOW, motors_speed);
+static motors_config m_right =
+  motors_config(HIGH, LOW, LOW, HIGH, motors_speed);
+// stop with state HIGH for PWM's is "fast brake"
+static motors_config m_stop =
+  motors_config(LOW, LOW, LOW, LOW, HIGH);
+
+///////// WHITE/RED LED //////////////////
 
 #define WHITE_LED 4
 #define RED_LED 12
 
 static void blink_white_led();
 
-///////// HEX CODED TV REMOTE SIGNALS /////////
+///////// HEX CODED TV REMOTE SIGNALS //////////////////
 
 // tv remote hex signals
 const unsigned long tv_up = 0xE0E006F9;
@@ -76,15 +126,18 @@ static int calibration_time_HCSR501 = 15;
 
 // struct describes HCSR501 motion sensors
 struct motion_sensor {
+
   int ID_sensor, pin_sensor;
   struct motion_sensor *prev;
   struct motion_sensor *next;
 
   motion_sensor() {};
+
   motion_sensor(int id, int pin) {
     ID_sensor = id;
     pin_sensor = pin;
   }
+
   void set_chain(struct motion_sensor *p,
                  struct motion_sensor *n) {
     prev = p;
@@ -165,7 +218,7 @@ void setup() {
   // because they are the also
   // the hardware serial port used to talk
   // with the Linux processor.
- // attachInterrupt(digitalPinToInterrupt(ENCODER_WHEEL), encoder_callback, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(ENCODER_WHEEL), encoder_callback, CHANGE);
 
   // start the IR receiver
   irrecv.enableIRIn();
@@ -216,22 +269,22 @@ static void check_IR_signal() {
     if (signal_code == tv_up) {
       blink_white_led();
       // Serial.println("up");
-      start_motors(LOW, HIGH, LOW, HIGH, motors_speed);
+      run_motors(motors_config(m_forward));
     } else if (signal_code == tv_down) {
       blink_white_led();
       // Serial.println("down");
-      start_motors(HIGH, LOW, HIGH, LOW, motors_speed);
+      run_motors(motors_config(m_backward));
     } else if (signal_code == tv_left) {
       blink_white_led();
       // Serial.println("left");
-      start_motors(HIGH, LOW, LOW, HIGH, motors_speed);
+      run_motors(motors_config(m_left));
     } else if (signal_code == tv_right) {
       blink_white_led();
       // Serial.println("right");
-      start_motors(LOW, HIGH, HIGH, LOW, motors_speed);
+      run_motors(motors_config(m_right));
     } else if (signal_code == tv_stop_engines) {
       blink_white_led();
-      stop_motors();
+      run_motors(motors_config(m_stop));
     } else if (signal_code == tv_faster) {
       boost_speed();
     } else if (signal_code == tv_slower) {
@@ -248,26 +301,14 @@ static void blink_white_led() {
   delay(100);
 }
 
-static void start_motors(int directionL1, int directionL2,
-                         int directionR1, int directionR2,
-                         int speedLR) {
-  digitalWrite(IN1, directionL1);
-  digitalWrite(IN2, directionL2);
-  // range 0~255
-  analogWrite(LEFT_ENGINE_SPEED, speedLR);
-  digitalWrite(IN3, directionR1);
-  digitalWrite(IN4, directionR2);
-  analogWrite(RIGHT_ENGINE_SPEED, speedLR);
-}
-
-static void stop_motors() {
-  // turn off motors
-  digitalWrite(IN1, LOW);
-  digitalWrite(IN2, LOW);
-  digitalWrite(IN3, LOW);
-  digitalWrite(IN4, LOW);
-  analogWrite(LEFT_ENGINE_SPEED, HIGH);
-  analogWrite(LEFT_ENGINE_SPEED, HIGH);
+static void run_motors(motors_config conf) {
+  digitalWrite(IN1, conf.in1);
+  digitalWrite(IN2, conf.in2);
+  digitalWrite(IN3, conf.in3);
+  digitalWrite(IN4, conf.in4);
+  // speed range 0~255
+  analogWrite(LEFT_ENGINE_SPEED, conf.speed1);
+  analogWrite(RIGHT_ENGINE_SPEED, conf.speed1);
 }
 
 static void boost_speed() {
@@ -298,43 +339,49 @@ static void reduce_speed() {
   }
 }
 
-volatile unsigned int old_state;
-volatile unsigned int new_state = digitalRead(ENCODER_WHEEL);
-volatile unsigned int state_counter = 0;
-volatile unsigned long sum_interrupt = 0;
+// debug
+// volatile unsigned int old_state;
+// volatile unsigned int new_state = digitalRead(ENCODER_WHEEL);
+// volatile unsigned int state_counter = 0;
+// volatile unsigned long sum_interrupt = 0;
 
-static void turn(int number_encoder_pulses) {
+// number_encoder_pulses
+// 8 pulses it is a full
+// rotation of the wheel
+static void turn(motors_config conf,
+                 int number_encoder_pulses) {
 
   encoder_turn_count = 0;
-  start_motors(LOW, HIGH, LOW, HIGH, 80);
+  run_motors(conf);
 
-  state_counter = 0;
-  old_state = digitalRead(ENCODER_WHEEL);
+  //  state_counter = 0;
+  //  old_state = digitalRead(ENCODER_WHEEL);
 
   while (encoder_turn_count < number_encoder_pulses) {
-    noInterrupts();
-    new_state = digitalRead(ENCODER_WHEEL);
-    if (new_state == old_state) {
-      ++state_counter;
-    } else {
-      Serial.print("1/8 PART TURN: ");
-      Serial.println(encoder_turn_count);
-      Serial.print("STATE: ");
-      Serial.println(old_state);
-      Serial.print("COUNT: ");
-      Serial.println(state_counter);
-      sum_interrupt += state_counter;
-      state_counter = 0;
-    }
-    old_state = new_state;
-    interrupts();
+    // debug
+    //    noInterrupts();
+    //    new_state = digitalRead(ENCODER_WHEEL);
+    //    if (new_state == old_state) {
+    //      ++state_counter;
+    //    } else {
+    //      Serial.print("PART TURN: ");
+    //      Serial.println(encoder_turn_count);
+    //      Serial.print("STATE: ");
+    //      Serial.println(old_state);
+    //      Serial.print("COUNT: ");
+    //      Serial.println(state_counter);
+    //      sum_interrupt += state_counter;
+    //      state_counter = 0;
+    //    }
+    //    old_state = new_state;
+    //    interrupts();
   }
-  Serial.println(encoder_turn_count);
-  stop_motors();
-  Serial.print("SUM: ");
-  Serial.println(sum_interrupt);
-  sum_interrupt = 0;
-  delay(5000);
+  // Serial.println(encoder_turn_count);
+  run_motors(m_stop);
+  // Serial.print("SUM: ");
+  // Serial.println(sum_interrupt);
+  // sum_interrupt = 0;
+  // delay(5000);
 }
 
 static void encoder_callback() {
@@ -413,44 +460,36 @@ static bool motion_detected(int sensor_pin) {
   }
 }
 
-// Bad practice. Hardcoded rotation angle
-// Encoders needed
 static void turn_to_motion_direction(int pin, bool between) {
   if (pin == 0) {
     if (between) { // between 0 and 1
-      start_motors(LOW, HIGH, HIGH, LOW, 180);
-      delay(250);
+      turn(m_forward, 1);
     } else {
       // move detected in front of Robik, don't turn around
     }
   } else if (pin == 1) {
-    start_motors(LOW, HIGH, HIGH, LOW, 180);
+    turn(m_right, 1);
     if (between) { // between 1 and 2
-      delay(750);
+      turn(m_right, 3);
     } else {
-      delay(500);
+      turn(m_right, 2);
     }
   } else if (pin == 2) {
     if (between) { // between 2 and 3
-      start_motors(HIGH, LOW, LOW, HIGH, 180);
-      delay(750);
+      turn(m_left, 3);
     } else {
-      start_motors(LOW, HIGH, HIGH, LOW, 180);
-      delay(1000);
+      turn(m_right, 4);
     }
   } else if (pin == 3) {
-    start_motors(HIGH, LOW, LOW, HIGH, 180);
     if (between) { // between 3 and 0
-      delay(250);
+      turn(m_left, 1);
     } else {
-      delay(500);
+      turn(m_left, 2);
     }
   }
-  stop_motors();
-  //start_motors(LOW, HIGH, LOW, HIGH, 180);
-  delay(1500);
-  //stop_motors();
-  delay(1600);
+  run_motors(m_stop);
+  // turn and the go forward!!!!!
+  // TODO
 }
 
 

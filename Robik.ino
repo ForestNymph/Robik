@@ -1,3 +1,4 @@
+#include <Servo.h>
 #include "IRremote.h"
 // PCF8574 bug in library.
 // 2 and 3 digital pin under-voltage issue
@@ -11,7 +12,13 @@
 
 // #define runEvery(t) for (static typeof(t) last_time; (typeof(t))millis() - last_time >= (t); last_time += (t))
 
-///////// L298 MOTOR DRIVER //////////////////
+///////// EXPANDER PCF8574 //////////////////
+
+// digital expander
+// (8 additional digital pins outside of board)
+static PCF8574 expander;
+
+///////// L298 MOTOR DRIVER ///////////////////////////
 
 // motor controller digital pins
 #define LEFT_ENGINE_SPEED 10
@@ -79,14 +86,14 @@ static struct motors_config m_right(HIGH, LOW, LOW, HIGH, motors_speed);
 // stop with state HIGH for PWM's is "fast brake"
 static struct motors_config m_stop(LOW, LOW, LOW, LOW, HIGH);
 
-///////// WHITE/RED LED //////////////////
+///////// WHITE/RED LED ///////////////////////////////
 
 #define WHITE_LED 4
 #define RED_LED 12
 
 static void blink_white_led();
 
-///////// HEX CODED TV REMOTE SIGNALS //////////////////
+///////// HEX CODED TV REMOTE SIGNALS ///////////////////
 
 // tv remote hex signals
 const unsigned long tv_up = 0xE0E006F9;
@@ -102,7 +109,7 @@ const unsigned long tv_slower = 0xE0E0D02F;
 // current signal code
 static unsigned long signal_code = 0x00000000;
 
-///////// ENCODERS DAGU RS030 ///////////////
+///////// ENCODERS DAGU RS030 //////////////////////////
 
 #define ENCODER_WHEEL 2
 
@@ -111,7 +118,7 @@ static volatile unsigned long encoder_turn_count = 0;
 static void turn(motors_config*, int);
 static void encoder_callback();
 
-///////// MOTION SENSOR HCSR501 (ekspander)///////////////
+///////// MOTION SENSOR HCSR501 (ekspander)/////////////
 
 // motion sensor digital pins on expander
 // hardware configuration HCSR501:
@@ -124,8 +131,8 @@ static void encoder_callback();
 #define MOTION_2 6
 #define MOTION_3 7
 
-// HCSR501 calibration time in sec.
-static int calibration_time_HCSR501 = 15;
+// HCSR501 calibration time in 15 sec.
+static int calibration_time_HCSR501 = 10;
 
 // struct describes HCSR501 motion sensors
 struct motion_sensor {
@@ -173,11 +180,10 @@ static void check_IR_signal();
 // #define HC_SR04_TRIGGER 3
 // #define HC_SR04_ECHO 2
 
-///////// EXPANDER PCF8574 //////////////////
+///////// MICRO SERVO TOWER PRO SG90 /////////////////////////
+static Servo servo;
 
-// digital expander
-// (8 additional digital pins outside of board)
-static PCF8574 expander;
+static void run_servo();
 
 void setup() {
 
@@ -236,12 +242,12 @@ void setup() {
   // start the IR receiver
   irrecv.enableIRIn();
 
+  // set pin for servo
+  servo.attach(3);
+
   if (debug) {
     Serial.begin(9600);
-    motion_sensor *s1 = motion_nr0.next;
-    motion_sensor *s2 = motion_nr0.prev;
-    Serial.println(s1->ID_sensor);
-    Serial.println(s2->ID_sensor);
+    Serial.println("Works!");
   }
 }
 
@@ -348,12 +354,13 @@ static void turn(motors_config* conf,
                  int number_encoder_pulses) {
 
   encoder_turn_count = 0;
-  // attachInterrupt(digitalPinToInterrupt(ENCODER_WHEEL), encoder_callback, CHANGE);
-  // run_motors(&conf);
-  // while (encoder_turn_count < number_encoder_pulses) {
-  // }
-  // run_motors(&m_stop);
-  // detachInterrupt(digitalPinToInterrupt(ENCODER_WHEEL));
+  attachInterrupt(digitalPinToInterrupt(ENCODER_WHEEL), encoder_callback, CHANGE);
+  // dlaczego tak???
+  //run_motors(conf);
+  //while (encoder_turn_count < number_encoder_pulses) {
+  //}
+  //run_motors(&m_stop);
+  detachInterrupt(digitalPinToInterrupt(ENCODER_WHEEL));
 }
 
 static void encoder_callback() {
@@ -464,6 +471,18 @@ static void turn_to_motion_direction(int pin, bool between) {
   // servo and hc-sr04
   // TODO
 }
+
+static void run_servo() {
+  for (int i = 20; i < 110; ++i) {
+    delay(20);
+    servo.write(i);
+  }
+  for (int i = 110; i > 20; --i) {
+    delay(20);
+    servo.write(i);
+  }
+}
+
 
 
 

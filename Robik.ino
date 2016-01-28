@@ -86,12 +86,19 @@ static struct motors_config m_right(HIGH, LOW, LOW, HIGH, motors_speed);
 // stop with state HIGH for PWM's is "fast brake"
 static struct motors_config m_stop(LOW, LOW, LOW, LOW, HIGH);
 
-///////// WHITE/RED LED ///////////////////////////////
+///////// WHITE/RED/GREEN LED ///////////////////////////////
 
-#define WHITE_LED 4
+#define WHITE_LED 13
 #define RED_LED 12
 
+#define GREEN_LED_0 A0
+#define GREEN_LED_1 A1
+#define GREEN_LED_2 A2
+#define GREEN_LED_3 A3
+
 static void blink_white_led();
+static void green_led_on(int);
+static void green_led_off();
 
 ///////// HEX CODED TV REMOTE SIGNALS ///////////////////
 
@@ -181,7 +188,9 @@ static void check_IR_signal();
 // #define HC_SR04_ECHO 2
 
 ///////// MICRO SERVO TOWER PRO SG90 /////////////////////////
-static Servo servo;
+
+#define SERVO 4
+// static Servo servo;
 
 static void run_servo();
 
@@ -198,6 +207,12 @@ void setup() {
   digitalWrite(WHITE_LED, LOW);
   pinMode(RED_LED, OUTPUT);
   digitalWrite(RED_LED, LOW);
+
+  // mode for led connected to analog pin
+  pinMode(A0, OUTPUT);
+  pinMode(A1, OUTPUT);
+  pinMode(A2, OUTPUT);
+  pinMode(A3, OUTPUT);
 
   // HCSR501 calibration
   calibrate_motion_sensors();
@@ -243,7 +258,7 @@ void setup() {
   irrecv.enableIRIn();
 
   // set pin for servo
-  servo.attach(3);
+  // servo.attach(SERVO);
 
   if (debug) {
     Serial.begin(9600);
@@ -257,6 +272,7 @@ void loop() {
   // detect_IR_signal();
 
   detect_motion();
+  // run_servo();
 }
 
 static void detect_IR_signal() {
@@ -307,6 +323,26 @@ static void blink_white_led() {
   delay(100);
 }
 
+static void green_led_on(int pin) {
+  if (pin == 0) {
+    digitalWrite(GREEN_LED_0, HIGH);
+  } else if (pin == 1) {
+    digitalWrite(GREEN_LED_1, HIGH);
+  } else if (pin == 2) {
+    digitalWrite(GREEN_LED_2, HIGH);
+  } else if (pin == 3) {
+    digitalWrite(GREEN_LED_3, HIGH);
+  }
+  delay(1000);
+}
+
+static void green_led_off() {
+  digitalWrite(GREEN_LED_0, LOW);
+  digitalWrite(GREEN_LED_1, LOW);
+  digitalWrite(GREEN_LED_2, LOW);
+  digitalWrite(GREEN_LED_3, LOW);
+}
+
 static void run_motors(motors_config* conf) {
   digitalWrite(IN1, (*conf).in1);
   digitalWrite(IN2, (*conf).in2);
@@ -354,13 +390,13 @@ static void turn(motors_config* conf,
                  int number_encoder_pulses) {
 
   encoder_turn_count = 0;
-  attachInterrupt(digitalPinToInterrupt(ENCODER_WHEEL), encoder_callback, CHANGE);
+  // attachInterrupt(digitalPinToInterrupt(ENCODER_WHEEL), encoder_callback, CHANGE);
   // dlaczego tak???
   //run_motors(conf);
   //while (encoder_turn_count < number_encoder_pulses) {
   //}
   //run_motors(&m_stop);
-  detachInterrupt(digitalPinToInterrupt(ENCODER_WHEEL));
+  //detachInterrupt(digitalPinToInterrupt(ENCODER_WHEEL));
 }
 
 static void encoder_callback() {
@@ -388,7 +424,7 @@ static void calibrate_motion_sensors() {
 }
 
 static void detect_motion() {
-  // get first sensor
+  // get the first sensor
   motion_sensor *element = &motion_nr0;
   // check status of related sensors and find 2 of them HIGH
   // check status of the of sensors and stop
@@ -397,6 +433,8 @@ static void detect_motion() {
     // if motion detected by two of the sensors
     if (motion_detected((*element).pin_sensor) &&
         motion_detected((*(*element).next).pin_sensor)) {
+      green_led_on((*element).ID_sensor);
+      green_led_on((*(*element).next).ID_sensor);
       turn_to_motion_direction((*element).ID_sensor, true);
       if (debug) {
         Serial.println("Motion detected both sides!");
@@ -405,9 +443,11 @@ static void detect_motion() {
       }
       // if motion detected by one of the sensors
     } else if (motion_detected((*element).pin_sensor)) {
+      green_led_on((*element).ID_sensor);
       turn_to_motion_direction((*element).ID_sensor, false);
     }
     element = (*element).next;
+    green_led_off();
   } while ((*(*element).prev).ID_sensor != 3);
 
   delay(500);
@@ -472,17 +512,13 @@ static void turn_to_motion_direction(int pin, bool between) {
   // TODO
 }
 
-static void run_servo() {
-  for (int i = 20; i < 110; ++i) {
-    delay(20);
-    servo.write(i);
-  }
-  for (int i = 110; i > 20; --i) {
-    delay(20);
-    servo.write(i);
-  }
-}
-
-
-
-
+//static void run_servo() {
+//  for (int i = 20; i < 110; ++i) {
+//    delay(20);
+//    servo.write(i);
+//  }
+//  for (int i = 110; i > 20; --i) {
+//    delay(20);
+//    servo.write(i);
+//  }
+//}

@@ -1,68 +1,59 @@
-#include <Servo.h>
-#include "IRremote.h"
-// PCF8574 bug in library.
-// 2 and 3 digital pin under-voltage issue
-// after uploading a new version of program need to full
-// restart Arduino and devices with external power source
-// connected to Arduino
+#include <IRremoteInt.h>
+#include <IRremote.h>
 #include "PCF8574.h"
 #include "Wire.h"
+#include <Servo.h>
 
 #define debug true
 
+// Robic can operate in two different modes:
+// 1. A robot controlled by the user with remote control
+// 2. Self-propelled robot moving through the source of motion
+// capable to verify the distance from objects
+// To change modes set true or false value for 'robot_remote_control'
+#define robot_remote_control true
+static void (*start_robic)();
+
 // #define runEvery(t) for (static typeof(t) last_time; (typeof(t))millis() - last_time >= (t); last_time += (t))
 
-///////// EXPANDER PCF8574 //////////////////
+///////// EXPANDER PCF8574 //////////////////////////////
 
 // digital expander
 // (8 additional digital pins outside of board)
+// Expander use interrupts. Pins SDL and SCA are hardware
+// connected to digital pin 2 and 3. Using expander on
+// SDL and SCA digital pins 2 and 3 won't work.
 static PCF8574 expander;
 
-///////// L298 MOTOR DRIVER ///////////////////////////
+///////// L298 MOTOR DRIVER /////////////////////////////
 
 // motor controller digital pins
-#define LEFT_ENGINE_SPEED 10
+// PWM pins for both wheels pin 5 because
+// the speed is always the same (for both)
+#define LEFT_ENGINE_SPEED 5
 #define RIGHT_ENGINE_SPEED 5
 #define IN1 9 // left
 #define IN2 8 // left
 #define IN3 7 // right
 #define IN4 6 // right
 
-// current motors speed
 static int motors_speed = 100;
 
-// struct describes full config of engines
-// configuration of speed and motors direction
+// struct describes full configuration of engines
+// like a speed and motors direction
 struct motors_config {
 
-  byte in1;
-  byte in2;
-  byte in3;
-  byte in4;
-  int speed1;
-  int speed2;
+  byte in1, in2, in3, in4;
+  int speed1, speed2;
 
   motors_config() {};
 
   motors_config(byte l1, byte l2, byte r1, byte r2,
-                int speed_l, int speed_r) {
-
-    in1 = l1;
-    in2 = l2;
-    in3 = r1;
-    in4 = r2;
-
-    speed1 = speed_l;
-    speed2 = speed_r;
-  }
-  motors_config(byte l1, byte l2, byte r1, byte r2,
                 int speed_lr) {
-
     in1 = l1;
     in2 = l2;
     in3 = r1;
     in4 = r2;
-
     speed1 = speed_lr;
     speed2 = speed_lr;
   }
@@ -74,6 +65,7 @@ struct motors_config {
 };
 
 static void run_motors(motors_config*);
+static void turn(motors_config*, int);
 static void boost_speed();
 static void reduce_speed();
 
@@ -81,26 +73,26 @@ static void reduce_speed();
 // (forward, backward, left, right, stop)
 static struct motors_config m_forward(HIGH, LOW, HIGH, LOW, motors_speed);
 static struct motors_config m_backward(LOW, HIGH, LOW, HIGH, motors_speed);
-static struct motors_config m_left(LOW, HIGH, HIGH, LOW, motors_speed);
-static struct motors_config m_right(HIGH, LOW, LOW, HIGH, motors_speed);
+static struct motors_config m_right(LOW, HIGH, HIGH, LOW, motors_speed);
+static struct motors_config m_left(HIGH, LOW, LOW, HIGH, motors_speed);
 // stop with state HIGH for PWM's is "fast brake"
 static struct motors_config m_stop(LOW, LOW, LOW, LOW, HIGH);
 
-///////// WHITE/RED/GREEN LED ///////////////////////////////
+///////// RED/YELLOW/GREEN LED //////////////////////////
 
-#define WHITE_LED 13
-#define RED_LED 12
+#define RED_LED 13
+#define YELLOW_LED A4
 
 #define GREEN_LED_0 A0
 #define GREEN_LED_1 A1
 #define GREEN_LED_2 A2
 #define GREEN_LED_3 A3
 
-static void blink_white_led();
+static void blink_red_led();
 static void green_led_on(int);
 static void green_led_off();
 
-///////// HEX CODED TV REMOTE SIGNALS ///////////////////
+///////// HEX CODED TV REMOTE SIGNALS //////////////////
 
 // tv remote hex signals
 const unsigned long tv_up = 0xE0E006F9;
@@ -116,16 +108,14 @@ const unsigned long tv_slower = 0xE0E0D02F;
 // current signal code
 static unsigned long signal_code = 0x00000000;
 
-///////// ENCODERS DAGU RS030 //////////////////////////
+///////// ENCODERS DAGU RS030 (expander) ///////////////
 
-#define ENCODER_WHEEL 2
+// #define ENCODER_WHEEL 2
 
 static volatile unsigned long encoder_turn_count = 0;
-
-static void turn(motors_config*, int);
 static void encoder_callback();
 
-///////// MOTION SENSOR HCSR501 (ekspander)/////////////
+///////// MOTION SENSOR HCSR501 (expander)//////////////
 
 // motion sensor digital pins on expander
 // hardware configuration HCSR501:
@@ -139,7 +129,7 @@ static void encoder_callback();
 #define MOTION_3 7
 
 // HCSR501 calibration time in 15 sec.
-static int calibration_time_HCSR501 = 10;
+static int calibration_time_HCSR501 = 15;
 
 // struct describes HCSR501 motion sensors
 struct motion_sensor {
@@ -173,9 +163,12 @@ static void detect_motion();
 static bool motion_detected(int);
 static void turn_to_motion_direction(int, bool);
 
-///////// INFRARED RECEIVER 1838T (38 KHz) //////////////////
+///////// INFRARED RECEIVER 1838T (38 KHz) //////////////
 
 // ir received signals from remote
+// library block one of 3 arduino timers for PWM, we
+// can't use the same timer on others PWM pins
+// for other devices
 #define IR_RECEIVER 11
 static IRrecv irrecv(IR_RECEIVER);
 static decode_results ir_results;
@@ -183,45 +176,31 @@ static decode_results ir_results;
 static void detect_IR_signal();
 static void check_IR_signal();
 
-///////// DISTANCE SENSOR HC-SR04 (expander)//////////////////
+///////// DISTANCE SENSOR HC-SR04 (expander)/////////////
+
 // #define HC_SR04_TRIGGER 3
 // #define HC_SR04_ECHO 2
 
-///////// MICRO SERVO TOWER PRO SG90 /////////////////////////
+///////// MICRO SERVO TOWER PRO SG90 ////////////////////
 
-#define SERVO 4
-// static Servo servo;
+// doc. Using Servo library
+// disables analogWrite() (PWM) functionality
+// on pins 9 and 10, whether or not there
+// is a Servo on those pins.
+#define SERVO 10
+static Servo servo;
 
 static void run_servo();
 
+/////////////////////////////////////////////////////////
+
 void setup() {
 
-  // set expander on 0x20 adress, all bits on low state (pins to GND)
-  // 0 1 0 0 A2 A1 A0 - (Ax) can be modify
-  // lowest adress 0x20, highest 0x27 (32-39)
-  // 8 different adresses can be set
-  expander.begin(0x20);
-
   // led mode
-  pinMode(WHITE_LED, OUTPUT);
-  digitalWrite(WHITE_LED, LOW);
   pinMode(RED_LED, OUTPUT);
   digitalWrite(RED_LED, LOW);
-
-  // mode for led connected to analog pin
-  pinMode(A0, OUTPUT);
-  pinMode(A1, OUTPUT);
-  pinMode(A2, OUTPUT);
-  pinMode(A3, OUTPUT);
-
-  // HCSR501 calibration
-  calibrate_motion_sensors();
-
-  // create dependencies between the sensors
-  motion_nr0.set_chain(&motion_nr3, &motion_nr1);
-  motion_nr1.set_chain(&motion_nr0, &motion_nr2);
-  motion_nr2.set_chain(&motion_nr1, &motion_nr3);
-  motion_nr3.set_chain(&motion_nr2, &motion_nr0);
+  pinMode(YELLOW_LED, OUTPUT);
+  digitalWrite(YELLOW_LED, LOW);
 
   // motors pin mode
   // don't need set pin mode as OUTPUT before calling analogWrite()
@@ -234,31 +213,60 @@ void setup() {
   analogWrite(LEFT_ENGINE_SPEED, 0);
   analogWrite(RIGHT_ENGINE_SPEED, 0);
 
-  // encoders pin mode
-  // internal pull up resistors ON (20-50kOhm)
-  // needed to eliminate interference on pins
-  pinMode(ENCODER_WHEEL, INPUT_PULLUP);
+  if (robot_remote_control) {
+    
+    // start the IR receiver
+    irrecv.enableIRIn();
+    start_robic = &detect_IR_signal;
+    
+  } else {
+    // set expander on 0x20 adress, all bits on low state (pins to GND)
+    // 0 1 0 0 A2 A1 A0 - (Ax) can be modify
+    // lowest adress 0x20, highest 0x27 (32-39)
+    // 8 different adresses can be set
+    expander.begin(0x20);
 
-  // Pins to External Interrupts in Arduino YUN:
-  // 3 (interrupt 0),
-  // 2 (interrupt 1),
-  // 0 (interrupt 2), (not recommended)
-  // 1 (interrupt 3), (not recommended)
-  // 7 (interrupt 4).
-  // These pins can be configured to trigger
-  // an interrupt on a low value, a rising or
-  // falling edge, or a change in value.
-  // Is not recommended to use pins 0 and 1 as interrupts
-  // because they are the also
-  // the hardware serial port used to talk
-  // with the Linux processor.
-  // Interrupts on/off moved to turn() function
+    // mode for led connected to analog pin
+    pinMode(GREEN_LED_0, OUTPUT);
+    pinMode(GREEN_LED_1, OUTPUT);
+    pinMode(GREEN_LED_2, OUTPUT);
+    pinMode(GREEN_LED_3, OUTPUT);
 
-  // start the IR receiver
-  irrecv.enableIRIn();
+    // HCSR501 calibration
+    calibrate_motion_sensors();
 
-  // set pin for servo
-  // servo.attach(SERVO);
+    // create dependencies between the sensors
+    motion_nr0.set_chain(&motion_nr3, &motion_nr1);
+    motion_nr1.set_chain(&motion_nr0, &motion_nr2);
+    motion_nr2.set_chain(&motion_nr1, &motion_nr3);
+    motion_nr3.set_chain(&motion_nr2, &motion_nr0);
+
+
+    // encoders pin mode
+    // internal pull up resistors ON (20-50kOhm)
+    // needed to eliminate interference on pins
+    // pinMode(ENCODER_WHEEL, INPUT_PULLUP);
+
+    // Pins to External Interrupts in Arduino YUN:
+    // 3 (interrupt 0),
+    // 2 (interrupt 1),
+    // 0 (interrupt 2), (not recommended)
+    // 1 (interrupt 3), (not recommended)
+    // 7 (interrupt 4).
+    // These pins can be configured to trigger
+    // an interrupt on a low value, a rising or
+    // falling edge, or a change in value.
+    // Is not recommended to use pins 0 and 1 as interrupts
+    // because they are the also
+    // the hardware serial port used to talk
+    // with the Linux processor.
+    // Interrupts on/off moved to turn() function
+
+    // set pin for servo
+    servo.attach(SERVO);
+
+    start_robic = &detect_motion;
+  }
 
   if (debug) {
     Serial.begin(9600);
@@ -267,12 +275,7 @@ void setup() {
 }
 
 void loop() {
-  // uncomment when use Robik with remote only
-  // and comment detect_motion() function
-  // detect_IR_signal();
-
-  detect_motion();
-  // run_servo();
+   (*start_robic)();
 }
 
 static void detect_IR_signal() {
@@ -293,19 +296,19 @@ static void check_IR_signal() {
 
   while (signal_code) {
     if (signal_code == tv_up) {
-      blink_white_led();
+      blink_red_led();
       run_motors(&m_forward);
     } else if (signal_code == tv_down) {
-      blink_white_led();
+      blink_red_led();
       run_motors(&m_backward);
     } else if (signal_code == tv_left) {
-      blink_white_led();
+      blink_red_led();
       run_motors(&m_left);
     } else if (signal_code == tv_right) {
-      blink_white_led();
+      blink_red_led();
       run_motors(&m_right);
     } else if (signal_code == tv_stop_engines) {
-      blink_white_led();
+      blink_red_led();
       run_motors(&m_stop);
     } else if (signal_code == tv_faster) {
       boost_speed();
@@ -316,10 +319,10 @@ static void check_IR_signal() {
   }
 }
 
-static void blink_white_led() {
-  digitalWrite(WHITE_LED, HIGH);
+static void blink_red_led() {
+  digitalWrite(RED_LED, HIGH);
   delay(100);
-  digitalWrite(WHITE_LED, LOW);
+  digitalWrite(RED_LED, LOW);
   delay(100);
 }
 
@@ -333,7 +336,6 @@ static void green_led_on(int pin) {
   } else if (pin == 3) {
     digitalWrite(GREEN_LED_3, HIGH);
   }
-  delay(1000);
 }
 
 static void green_led_off() {
@@ -360,7 +362,7 @@ static void boost_speed() {
   // change of 20
   if ((motors_speed + 20) > 255) {
   } else {
-    blink_white_led();
+    blink_red_led();
     motors_speed += 20;
     if (debug) {
       Serial.println("plus");
@@ -374,7 +376,7 @@ static void reduce_speed() {
   // change of 20
   if ((motors_speed - 20) < 35) {
   } else {
-    blink_white_led();
+    blink_red_led();
     motors_speed -= 20;
     if (debug) {
       Serial.println("minus");
@@ -389,12 +391,12 @@ static void reduce_speed() {
 static void turn(motors_config* conf,
                  int number_encoder_pulses) {
 
-  encoder_turn_count = 0;
-  // attachInterrupt(digitalPinToInterrupt(ENCODER_WHEEL), encoder_callback, CHANGE);
-  // dlaczego tak???
+  //encoder_turn_count = 0;
+  //attachInterrupt(digitalPinToInterrupt(ENCODER_WHEEL), encoder_callback, CHANGE);
   //run_motors(conf);
   //while (encoder_turn_count < number_encoder_pulses) {
   //}
+  //delay(2000);
   //run_motors(&m_stop);
   //detachInterrupt(digitalPinToInterrupt(ENCODER_WHEEL));
 }
@@ -406,7 +408,7 @@ static void encoder_callback() {
 // calibrate HCSR501 sensor
 // set INPUT mode for digtal pins on expander
 static void calibrate_motion_sensors() {
-  digitalWrite(RED_LED, HIGH);
+  digitalWrite(YELLOW_LED, HIGH);
   expander.pinMode(MOTION_0, INPUT);
   expander.pinMode(MOTION_1, INPUT);
   expander.pinMode(MOTION_2, INPUT);
@@ -416,19 +418,19 @@ static void calibrate_motion_sensors() {
   // do nothing? Only disable internal pullup but
   // this is not pull down
   expander.write(LOW);
-  // expander.clear();
+
   for (int i = 0; i < calibration_time_HCSR501; ++i) {
     delay(1000);
   }
-  digitalWrite(RED_LED, LOW);
+  digitalWrite(YELLOW_LED, LOW);
 }
 
 static void detect_motion() {
   // get the first sensor
   motion_sensor *element = &motion_nr0;
-  // check status of related sensors and find 2 of them HIGH
-  // check status of the of sensors and stop
-  // when checking return to the first one
+  // check status of related sensors
+  // and find 2 or 1 of them HIGH
+  // stop when checking return to the first one
   do {
     // if motion detected by two of the sensors
     if (motion_detected((*element).pin_sensor) &&
@@ -447,27 +449,27 @@ static void detect_motion() {
       turn_to_motion_direction((*element).ID_sensor, false);
     }
     element = (*element).next;
+
+    delay(800);
     green_led_off();
   } while ((*(*element).prev).ID_sensor != 3);
-
-  delay(500);
-
-  if (debug) {
-    if (motion_detected(MOTION_0)) {
-      Serial.println("Motion detected 0");
-    }
-    else if (motion_detected(MOTION_1)) {
-      Serial.println("Motion detected 1");
-    }
-    else if (motion_detected(MOTION_2)) {
-      Serial.println("Motion detected 2");
-    }
-    else if (motion_detected(MOTION_3)) {
-      Serial.println("Motion detected 3");
-    } else {
-      Serial.println("No Motion!");
-    }
-  }
+  //
+  //  if (debug) {
+  //    if (motion_detected(MOTION_0)) {
+  //      Serial.println("Motion detected 0");
+  //    }
+  //    else if (motion_detected(MOTION_1)) {
+  //      Serial.println("Motion detected 1");
+  //    }
+  //    else if (motion_detected(MOTION_2)) {
+  //      Serial.println("Motion detected 2");
+  //    }
+  //    else if (motion_detected(MOTION_3)) {
+  //      Serial.println("Motion detected 3");
+  //    } else {
+  //      Serial.println("No Motion!");
+  //    }
+  //  }
 }
 
 // if motion is detected return HIGH state
@@ -522,3 +524,5 @@ static void turn_to_motion_direction(int pin, bool between) {
 //    servo.write(i);
 //  }
 //}
+
+

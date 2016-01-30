@@ -25,10 +25,6 @@ static void (*start_robic)();
 // SDL and SCA digital pins 2 and 3 won't work.
 static PCF8574 expander;
 
-#define INT_PIN 12
-
-static void expander_callback();
-
 ///////// L298 MOTOR DRIVER /////////////////////////////
 
 // motor controller digital pins
@@ -41,7 +37,7 @@ static void expander_callback();
 #define IN3 7 // right
 #define IN4 6 // right
 
-static int motors_speed = 100;
+static int motors_speed = 80;
 
 // struct describes full configuration of engines
 // like a speed and motors direction
@@ -96,7 +92,7 @@ static void blink_red_led();
 static void green_led_on(int);
 static void green_led_off();
 
-///////// HEX CODED TV REMOTE SIGNALS //////////////////
+///////// HEX CODED TV REMOTE SIGNALS ///////////////////
 
 // tv remote hex signals
 const unsigned long tv_up = 0xE0E006F9;
@@ -112,14 +108,29 @@ const unsigned long tv_slower = 0xE0E0D02F;
 // current signal code
 static unsigned long signal_code = 0x00000000;
 
-///////// ENCODERS DAGU RS030 (expander) ///////////////
+///////// ENCODERS DAGU RS030 ///////////////////////////
 
-#define ENCODER_WHEEL 3
+// Pins to External Interrupts in Arduino YUN:
+// 3 (interrupt 0),
+// 2 (interrupt 1),
+// 0 (interrupt 2), (not recommended)
+// 1 (interrupt 3), (not recommended)
+// 7 (interrupt 4).
+// These pins can be configured to trigger
+// an interrupt on a low value, a rising or
+// falling edge, or a change in value.
+// Is not recommended to use pins 0 and 1 as interrupts
+// because they are the also the hardware
+// serial port used to talk with the Linux processor.
 
-static volatile unsigned long encoder_turn_count = 0;
-static void encoder_callback();
+// Problem: expander's SDA, SCL block Arduino pins 2 and 3
+// Solution: while driving - manually poll and count
+// changing state of the pin
+// In this case interrupts are not needed
 
-///////// MOTION SENSOR HCSR501 (expander)//////////////
+#define ENCODER_WHEEL 4
+
+///////// MOTION SENSOR HCSR501 (expander) //////////////
 
 // motion sensor digital pins on expander
 // hardware configuration HCSR501:
@@ -182,8 +193,8 @@ static void check_IR_signal();
 
 ///////// DISTANCE SENSOR HC-SR04 (expander)/////////////
 
-// #define HC_SR04_TRIGGER 3
-// #define HC_SR04_ECHO 2
+#define HC_SR04_TRIGGER 12
+#define HC_SR04_ECHO 10
 
 ///////// MICRO SERVO TOWER PRO SG90 ////////////////////
 
@@ -218,23 +229,23 @@ void setup() {
   analogWrite(RIGHT_ENGINE_SPEED, 0);
 
   if (robot_remote_control) {
-    
+
     // start the IR receiver
     irrecv.enableIRIn();
     start_robic = &detect_IR_signal;
-    
+
   } else {
     // set expander on 0x20 adress, all bits on low state (pins to GND)
     // 0 1 0 0 A2 A1 A0 - (Ax) can be modify
     // lowest adress 0x20, highest 0x27 (32-39)
     // 8 different adresses can be set
     expander.begin(0x20);
-    // 'open drain' - pin state is either low or unsteady
-    pinMode(INT_PIN, INPUT);
-    digitalWrite(INT_PIN, HIGH);
-    expander.pinMode(ENCODER_WHEEL, INPUT);
-    //digitalWrite(INT_PIN, expander.digitalRead(ENCODER_WHEEL));
-    expander.enableInterrupt(INT_PIN, expander_callback);
+
+
+    // internal pull up resistors ON (20-50kOhm)
+    // needed to eliminate interference on pin
+    pinMode(ENCODER_WHEEL, INPUT_PULLUP);
+    digitalWrite(ENCODER_WHEEL, HIGH);
 
     // mode for led connected to analog pin
     pinMode(GREEN_LED_0, OUTPUT);
@@ -251,24 +262,6 @@ void setup() {
     motion_nr2.set_chain(&motion_nr1, &motion_nr3);
     motion_nr3.set_chain(&motion_nr2, &motion_nr0);
 
-    // encoders pin mode
-    // internal pull up resistors ON (20-50kOhm)
-    // needed to eliminate interference on pins
-    // pinMode(ENCODER_WHEEL, INPUT_PULLUP);
-
-    // Pins to External Interrupts in Arduino YUN:
-    // 3 (interrupt 0),
-    // 2 (interrupt 1),
-    // 0 (interrupt 2), (not recommended)
-    // 1 (interrupt 3), (not recommended)
-    // 7 (interrupt 4).
-    // These pins can be configured to trigger
-    // an interrupt on a low value, a rising or
-    // falling edge, or a change in value.
-    // Is not recommended to use pins 0 and 1 as interrupts
-    // because they are the also the hardware
-    // serial port used to talk with the Linux processor.
-
     // set pin for servo
     // servo.attach(SERVO);
 
@@ -282,7 +275,7 @@ void setup() {
 }
 
 void loop() {
-   (*start_robic)();
+  (*start_robic)();
 }
 
 static void detect_IR_signal() {
@@ -397,21 +390,20 @@ static void reduce_speed() {
 // it is independent from speed
 static void turn(motors_config* conf,
                  int number_encoder_pulses) {
-
-  encoder_turn_count = 0;
-  expander.attachInterrupt(ENCODER_WHEEL, encoder_callback, CHANGE);
+  int encoder_turn_count = 0;
+  byte new_state, old_state = digitalRead(ENCODER_WHEEL);
   run_motors(conf);
-  while (encoder_turn_count < number_encoder_pulses){}
+  while (true) {
+      if (new_state != old_state) {
+        ++encoder_turn_count;
+        old_state = new_state;
+        if (encoder_turn_count >= number_encoder_pulses) {
+          break;
+        }
+      }
+      new_state = digitalRead(ENCODER_WHEEL);
+  }
   run_motors(&m_stop);
-  expander.detachInterrupt(ENCODER_WHEEL);
-}
-
-static void expander_callback() {
-  expander.checkForInterrupt();
-}
-
-static void encoder_callback() {
-  encoder_turn_count += 1;
 }
 
 // calibrate HCSR501 sensor
@@ -459,7 +451,7 @@ static void detect_motion() {
     element = (*element).next;
 
     delay(800);
-    
+
     green_led_off();
   } while ((*(*element).prev).ID_sensor != 3);
 }

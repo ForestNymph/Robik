@@ -2,7 +2,7 @@
 #include <IRremote.h>
 #include "PCF8574.h"
 #include "Wire.h"
-#include <Servo.h>
+// #include <Servo.h>
 
 #define debug true
 
@@ -11,10 +11,10 @@
 // 2. Self-propelled robot moving through the source of motion
 // capable to verify the distance from objects
 // To change modes set true or false value for 'robot_remote_control'
-#define robot_remote_control true
+#define robot_remote_control false
 static void (*start_robic)();
 
-// #define runEvery(t) for (static typeof(t) last_time; (typeof(t))millis() - last_time >= (t); last_time += (t))
+#define runEvery(t) for (static typeof(t) last_time; (typeof(t))millis() - last_time >= (t); last_time += (t))
 
 ///////// EXPANDER PCF8574 //////////////////////////////
 
@@ -24,6 +24,10 @@ static void (*start_robic)();
 // connected to digital pin 2 and 3. Using expander on
 // SDL and SCA digital pins 2 and 3 won't work.
 static PCF8574 expander;
+
+#define INT_PIN 12
+
+static void expander_callback();
 
 ///////// L298 MOTOR DRIVER /////////////////////////////
 
@@ -110,7 +114,7 @@ static unsigned long signal_code = 0x00000000;
 
 ///////// ENCODERS DAGU RS030 (expander) ///////////////
 
-// #define ENCODER_WHEEL 2
+#define ENCODER_WHEEL 3
 
 static volatile unsigned long encoder_turn_count = 0;
 static void encoder_callback();
@@ -187,10 +191,10 @@ static void check_IR_signal();
 // disables analogWrite() (PWM) functionality
 // on pins 9 and 10, whether or not there
 // is a Servo on those pins.
-#define SERVO 10
-static Servo servo;
+// #define SERVO 10
+// static Servo servo;
 
-static void run_servo();
+// static void run_servo();
 
 /////////////////////////////////////////////////////////
 
@@ -225,6 +229,12 @@ void setup() {
     // lowest adress 0x20, highest 0x27 (32-39)
     // 8 different adresses can be set
     expander.begin(0x20);
+    // 'open drain' - pin state is either low or unsteady
+    pinMode(INT_PIN, INPUT);
+    digitalWrite(INT_PIN, HIGH);
+    expander.pinMode(ENCODER_WHEEL, INPUT);
+    //digitalWrite(INT_PIN, expander.digitalRead(ENCODER_WHEEL));
+    expander.enableInterrupt(INT_PIN, expander_callback);
 
     // mode for led connected to analog pin
     pinMode(GREEN_LED_0, OUTPUT);
@@ -241,7 +251,6 @@ void setup() {
     motion_nr2.set_chain(&motion_nr1, &motion_nr3);
     motion_nr3.set_chain(&motion_nr2, &motion_nr0);
 
-
     // encoders pin mode
     // internal pull up resistors ON (20-50kOhm)
     // needed to eliminate interference on pins
@@ -257,13 +266,11 @@ void setup() {
     // an interrupt on a low value, a rising or
     // falling edge, or a change in value.
     // Is not recommended to use pins 0 and 1 as interrupts
-    // because they are the also
-    // the hardware serial port used to talk
-    // with the Linux processor.
-    // Interrupts on/off moved to turn() function
+    // because they are the also the hardware
+    // serial port used to talk with the Linux processor.
 
     // set pin for servo
-    servo.attach(SERVO);
+    // servo.attach(SERVO);
 
     start_robic = &detect_motion;
   }
@@ -391,14 +398,16 @@ static void reduce_speed() {
 static void turn(motors_config* conf,
                  int number_encoder_pulses) {
 
-  //encoder_turn_count = 0;
-  //attachInterrupt(digitalPinToInterrupt(ENCODER_WHEEL), encoder_callback, CHANGE);
-  //run_motors(conf);
-  //while (encoder_turn_count < number_encoder_pulses) {
-  //}
-  //delay(2000);
-  //run_motors(&m_stop);
-  //detachInterrupt(digitalPinToInterrupt(ENCODER_WHEEL));
+  encoder_turn_count = 0;
+  expander.attachInterrupt(ENCODER_WHEEL, encoder_callback, CHANGE);
+  run_motors(conf);
+  while (encoder_turn_count < number_encoder_pulses){}
+  run_motors(&m_stop);
+  expander.detachInterrupt(ENCODER_WHEEL);
+}
+
+static void expander_callback() {
+  expander.checkForInterrupt();
 }
 
 static void encoder_callback() {
@@ -415,8 +424,7 @@ static void calibrate_motion_sensors() {
   expander.pinMode(MOTION_3, INPUT);
   // all pins disable the internal pull down on the input pin
   // http://forum.arduino.cc/index.php?topic=5313.0
-  // do nothing? Only disable internal pullup but
-  // this is not pull down
+  // Only disable internal pullup but this is not pull down
   expander.write(LOW);
 
   for (int i = 0; i < calibration_time_HCSR501; ++i) {
@@ -451,25 +459,9 @@ static void detect_motion() {
     element = (*element).next;
 
     delay(800);
+    
     green_led_off();
   } while ((*(*element).prev).ID_sensor != 3);
-  //
-  //  if (debug) {
-  //    if (motion_detected(MOTION_0)) {
-  //      Serial.println("Motion detected 0");
-  //    }
-  //    else if (motion_detected(MOTION_1)) {
-  //      Serial.println("Motion detected 1");
-  //    }
-  //    else if (motion_detected(MOTION_2)) {
-  //      Serial.println("Motion detected 2");
-  //    }
-  //    else if (motion_detected(MOTION_3)) {
-  //      Serial.println("Motion detected 3");
-  //    } else {
-  //      Serial.println("No Motion!");
-  //    }
-  //  }
 }
 
 // if motion is detected return HIGH state

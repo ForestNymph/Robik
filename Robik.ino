@@ -4,7 +4,7 @@
 #include "Wire.h"
 // #include <Servo.h>
 
-#define debug true
+#define debug false
 
 // Robic can operate in two different modes:
 // 1. A robot controlled by the user with remote control
@@ -14,7 +14,7 @@
 #define robot_remote_control false
 static void (*start_robic)();
 
-#define runEvery(t) for (static typeof(t) last_time; (typeof(t))millis() - last_time >= (t); last_time += (t))
+// #define runEvery(t) for (static typeof(t) last_time; (typeof(t))millis() - last_time >= (t); last_time += (t))
 
 ///////// EXPANDER PCF8574 //////////////////////////////
 
@@ -65,7 +65,6 @@ struct motors_config {
 };
 
 static void run_motors(motors_config*);
-static void turn(motors_config*, int);
 static void boost_speed();
 static void reduce_speed();
 
@@ -130,6 +129,8 @@ static unsigned long signal_code = 0x00000000;
 
 #define ENCODER_WHEEL 4
 
+static void turn(motors_config*, int);
+
 ///////// MOTION SENSOR HCSR501 (expander) //////////////
 
 // motion sensor digital pins on expander
@@ -193,8 +194,14 @@ static void check_IR_signal();
 
 ///////// DISTANCE SENSOR HC-SR04 (expander)/////////////
 
-#define HC_SR04_TRIGGER 12
-#define HC_SR04_ECHO 10
+#define HC_SR04_TRIGGER 10
+#define HC_SR04_ECHO 12
+
+// minimum distance from object: 100 cm
+static long min_distance = 100;
+
+static bool detect_distance();
+static long convert_microsec_to_centimeters();
 
 ///////// MICRO SERVO TOWER PRO SG90 ////////////////////
 
@@ -227,6 +234,9 @@ void setup() {
   pinMode(IN4, OUTPUT);
   analogWrite(LEFT_ENGINE_SPEED, 0);
   analogWrite(RIGHT_ENGINE_SPEED, 0);
+
+  pinMode(HC_SR04_TRIGGER, OUTPUT);
+  pinMode(HC_SR04_ECHO, INPUT);
 
   if (robot_remote_control) {
 
@@ -319,30 +329,89 @@ static void check_IR_signal() {
   }
 }
 
-static void blink_red_led() {
-  digitalWrite(RED_LED, HIGH);
-  delay(100);
-  digitalWrite(RED_LED, LOW);
-  delay(100);
+static void detect_motion() {
+  // get the first sensor
+  motion_sensor *element = &motion_nr0;
+  // check status of related sensors
+  // and find 2 or 1 of them HIGH
+  // stop when checking return to the first one
+  do {
+    // if motion detected by two of the sensors
+    if (motion_detected((*element).pin_sensor) &&
+        motion_detected((*(*element).next).pin_sensor)) {
+      green_led_on((*element).ID_sensor);
+      green_led_on((*(*element).next).ID_sensor);
+      turn_to_motion_direction((*element).ID_sensor, true);
+      if (debug) {
+        Serial.println("Motion detected both sides!");
+        Serial.println((*element).ID_sensor);
+        Serial.println((*(*element).next).ID_sensor);
+      }
+      // if motion detected by one of the sensors
+    } else if (motion_detected((*element).pin_sensor)) {
+      green_led_on((*element).ID_sensor);
+      turn_to_motion_direction((*element).ID_sensor, false);
+    }
+    element = (*element).next;
+
+    delay(800);
+
+    green_led_off();
+  } while ((*(*element).prev).ID_sensor != 3);
 }
 
-static void green_led_on(int pin) {
-  if (pin == 0) {
-    digitalWrite(GREEN_LED_0, HIGH);
-  } else if (pin == 1) {
-    digitalWrite(GREEN_LED_1, HIGH);
-  } else if (pin == 2) {
-    digitalWrite(GREEN_LED_2, HIGH);
-  } else if (pin == 3) {
-    digitalWrite(GREEN_LED_3, HIGH);
+// if motion is detected return HIGH state
+static bool motion_detected(int sensor_pin) {
+  int val = expander.digitalRead(sensor_pin);
+  if (val == LOW) {
+    return false;
+  } else {
+    return true;
   }
 }
 
-static void green_led_off() {
-  digitalWrite(GREEN_LED_0, LOW);
-  digitalWrite(GREEN_LED_1, LOW);
-  digitalWrite(GREEN_LED_2, LOW);
-  digitalWrite(GREEN_LED_3, LOW);
+static bool detect_distance() {
+  long duration, distance = 0;
+  digitalWrite(HC_SR04_TRIGGER, LOW);
+  delayMicroseconds(2);
+  digitalWrite(HC_SR04_TRIGGER, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(HC_SR04_TRIGGER, LOW);
+  duration = pulseIn(HC_SR04_ECHO, HIGH);
+  distance = convert_micorsec_to_centimeters(duration);
+
+  if (distance > min_distance) {
+    return true;
+  }
+  return false;
+}
+
+static long convert_micorsec_to_centimeters(long microseconds) {
+  // The speed of sound is 340 m/s or 29 microseconds per centimeter.
+  // The ping travels out and back, so to find the distance of the
+  // object we take half of the distance travelled.
+  return microseconds / 29 / 2;
+}
+
+// number_encoder_pulses
+// 8 pulses it is a full rotation of the wheel
+// it is independent from speed
+static void turn(motors_config* conf,
+                 int number_encoder_pulses) {
+  int encoder_turn_count = 0;
+  byte new_state, old_state = digitalRead(ENCODER_WHEEL);
+  run_motors(conf);
+  while (true) {
+    if (new_state != old_state) {
+      ++encoder_turn_count;
+      old_state = new_state;
+      if (encoder_turn_count >= number_encoder_pulses) {
+        break;
+      }
+    }
+    new_state = digitalRead(ENCODER_WHEEL);
+  }
+  run_motors(&m_stop);
 }
 
 static void run_motors(motors_config* conf) {
@@ -385,27 +454,6 @@ static void reduce_speed() {
   }
 }
 
-// number_encoder_pulses
-// 8 pulses it is a full rotation of the wheel
-// it is independent from speed
-static void turn(motors_config* conf,
-                 int number_encoder_pulses) {
-  int encoder_turn_count = 0;
-  byte new_state, old_state = digitalRead(ENCODER_WHEEL);
-  run_motors(conf);
-  while (true) {
-      if (new_state != old_state) {
-        ++encoder_turn_count;
-        old_state = new_state;
-        if (encoder_turn_count >= number_encoder_pulses) {
-          break;
-        }
-      }
-      new_state = digitalRead(ENCODER_WHEEL);
-  }
-  run_motors(&m_stop);
-}
-
 // calibrate HCSR501 sensor
 // set INPUT mode for digtal pins on expander
 static void calibrate_motion_sensors() {
@@ -425,77 +473,62 @@ static void calibrate_motion_sensors() {
   digitalWrite(YELLOW_LED, LOW);
 }
 
-static void detect_motion() {
-  // get the first sensor
-  motion_sensor *element = &motion_nr0;
-  // check status of related sensors
-  // and find 2 or 1 of them HIGH
-  // stop when checking return to the first one
-  do {
-    // if motion detected by two of the sensors
-    if (motion_detected((*element).pin_sensor) &&
-        motion_detected((*(*element).next).pin_sensor)) {
-      green_led_on((*element).ID_sensor);
-      green_led_on((*(*element).next).ID_sensor);
-      turn_to_motion_direction((*element).ID_sensor, true);
-      if (debug) {
-        Serial.println("Motion detected both sides!");
-        Serial.println((*element).ID_sensor);
-        Serial.println((*(*element).next).ID_sensor);
-      }
-      // if motion detected by one of the sensors
-    } else if (motion_detected((*element).pin_sensor)) {
-      green_led_on((*element).ID_sensor);
-      turn_to_motion_direction((*element).ID_sensor, false);
-    }
-    element = (*element).next;
-
-    delay(800);
-
-    green_led_off();
-  } while ((*(*element).prev).ID_sensor != 3);
-}
-
-// if motion is detected return HIGH state
-static bool motion_detected(int sensor_pin) {
-  int val = expander.digitalRead(sensor_pin);
-  if (val == LOW) {
-    return false;
-  } else {
-    return true;
-  }
-}
-
 static void turn_to_motion_direction(int pin, bool between) {
   if (pin == 0) {
     if (between) { // between 0 and 1
-      turn(&m_forward, 16);
+      turn(&m_right, 1);
     } else {
-      // move detected in front of Robik, don't turn around
+      // move detected in front of Robik
+      // don't turn around just go forward
     }
   } else if (pin == 1) {
     if (between) { // between 1 and 2
-      turn(&m_right, 16);
+      turn(&m_right, 3);
     } else {
-      turn(&m_right, 16);
+      turn(&m_right, 2);
     }
   } else if (pin == 2) {
     if (between) { // between 2 and 3
-      turn(&m_left, 16);
+      turn(&m_left, 3);
     } else {
-      turn(&m_right, 16);
+      turn(&m_right, 4);
     }
   } else if (pin == 3) {
     if (between) { // between 3 and 0
-      turn(&m_left, 16);
+      turn(&m_left, 1);
     } else {
-      turn(&m_left, 16);
+      turn(&m_left, 2);
     }
   }
+  run_motors(&m_forward);
+  while (!detect_distance()) {}
   run_motors(&m_stop);
-  // turn and the go forward until obstacle
-  // servo and hc-sr04
-  // TODO
+}
+
+static void blink_red_led() {
+  digitalWrite(RED_LED, HIGH);
+  delay(100);
+  digitalWrite(RED_LED, LOW);
+  delay(100);
+}
+
+static void green_led_on(int pin) {
+  if (pin == 0) {
+    digitalWrite(GREEN_LED_0, HIGH);
+  } else if (pin == 1) {
+    digitalWrite(GREEN_LED_1, HIGH);
+  } else if (pin == 2) {
+    digitalWrite(GREEN_LED_2, HIGH);
+  } else if (pin == 3) {
+    digitalWrite(GREEN_LED_3, HIGH);
+  }
+}
+
+static void green_led_off() {
+  digitalWrite(GREEN_LED_0, LOW);
+  digitalWrite(GREEN_LED_1, LOW);
+  digitalWrite(GREEN_LED_2, LOW);
+  digitalWrite(GREEN_LED_3, LOW);
 }
 
 //static void run_servo() {
@@ -508,5 +541,6 @@ static void turn_to_motion_direction(int pin, bool between) {
 //    servo.write(i);
 //  }
 //}
+
 
 

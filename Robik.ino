@@ -75,7 +75,7 @@ static struct motors_config m_backward(LOW, HIGH, LOW, HIGH, motors_speed);
 static struct motors_config m_right(LOW, HIGH, HIGH, LOW, motors_speed);
 static struct motors_config m_left(HIGH, LOW, LOW, HIGH, motors_speed);
 // stop with state HIGH for PWM's is "fast brake"
-static struct motors_config m_stop(LOW, LOW, LOW, LOW, HIGH);
+static struct motors_config m_stop(HIGH, HIGH, HIGH, HIGH, HIGH);
 
 ///////// RED/YELLOW/GREEN LED //////////////////////////
 
@@ -197,10 +197,10 @@ static void check_IR_signal();
 #define HC_SR04_TRIGGER 10
 #define HC_SR04_ECHO 12
 
-// minimum distance from object: 100 cm
-static long min_distance = 100;
+// minimum distance from object: 20 cm
+static long min_distance = 20;
 
-static bool detect_distance();
+static bool detect_min_distance();
 static long convert_microsec_to_centimeters();
 
 ///////// MICRO SERVO TOWER PRO SG90 ////////////////////
@@ -280,7 +280,7 @@ void setup() {
 
   if (debug) {
     Serial.begin(9600);
-    Serial.println("Works!");
+    Serial.println(F("Works!"));
   }
 }
 
@@ -304,28 +304,25 @@ static void check_IR_signal() {
 
   signal_code = ir_results.value;
 
-  while (signal_code) {
-    if (signal_code == tv_up) {
-      blink_red_led();
-      run_motors(&m_forward);
-    } else if (signal_code == tv_down) {
-      blink_red_led();
-      run_motors(&m_backward);
-    } else if (signal_code == tv_left) {
-      blink_red_led();
-      run_motors(&m_left);
-    } else if (signal_code == tv_right) {
-      blink_red_led();
-      run_motors(&m_right);
-    } else if (signal_code == tv_stop_engines) {
-      blink_red_led();
-      run_motors(&m_stop);
-    } else if (signal_code == tv_faster) {
-      boost_speed();
-    } else if (signal_code == tv_slower) {
-      reduce_speed();
-    }
-    signal_code = 0x0000000;
+  if (signal_code == tv_up) {
+    blink_red_led();
+    run_motors(&m_forward);
+  } else if (signal_code == tv_down) {
+    blink_red_led();
+    run_motors(&m_backward);
+  } else if (signal_code == tv_left) {
+    blink_red_led();
+    run_motors(&m_left);
+  } else if (signal_code == tv_right) {
+    blink_red_led();
+    run_motors(&m_right);
+  } else if (signal_code == tv_stop_engines) {
+    blink_red_led();
+    run_motors(&m_stop);
+  } else if (signal_code == tv_faster) {
+    boost_speed();
+  } else if (signal_code == tv_slower) {
+    reduce_speed();
   }
 }
 
@@ -343,7 +340,7 @@ static void detect_motion() {
       green_led_on((*(*element).next).ID_sensor);
       turn_to_motion_direction((*element).ID_sensor, true);
       if (debug) {
-        Serial.println("Motion detected both sides!");
+        Serial.println(F("Motion detected both sides!"));
         Serial.println((*element).ID_sensor);
         Serial.println((*(*element).next).ID_sensor);
       }
@@ -354,7 +351,7 @@ static void detect_motion() {
     }
     element = (*element).next;
 
-    delay(800);
+    delay(1000);
 
     green_led_off();
   } while ((*(*element).prev).ID_sensor != 3);
@@ -370,7 +367,7 @@ static bool motion_detected(int sensor_pin) {
   }
 }
 
-static bool detect_distance() {
+static bool detect_min_distance() {
   long duration, distance = 0;
   digitalWrite(HC_SR04_TRIGGER, LOW);
   delayMicroseconds(2);
@@ -433,10 +430,6 @@ static void boost_speed() {
   } else {
     blink_red_led();
     motors_speed += 20;
-    if (debug) {
-      Serial.println("plus");
-      Serial.println(motors_speed);
-    }
   }
 }
 
@@ -447,10 +440,6 @@ static void reduce_speed() {
   } else {
     blink_red_led();
     motors_speed -= 20;
-    if (debug) {
-      Serial.println("minus");
-      Serial.println(motors_speed);
-    }
   }
 }
 
@@ -476,32 +465,32 @@ static void calibrate_motion_sensors() {
 static void turn_to_motion_direction(int pin, bool between) {
   if (pin == 0) {
     if (between) { // between 0 and 1
-      turn(&m_right, 1);
+      turn(&m_right, 7);
     } else {
       // move detected in front of Robik
       // don't turn around just go forward
     }
   } else if (pin == 1) {
     if (between) { // between 1 and 2
-      turn(&m_right, 3);
+      turn(&m_right, 24);
     } else {
-      turn(&m_right, 2);
+      turn(&m_right, 12);
     }
   } else if (pin == 2) {
     if (between) { // between 2 and 3
-      turn(&m_left, 3);
+      turn(&m_left, 24);
     } else {
-      turn(&m_right, 4);
+      turn(&m_right, 32);
     }
   } else if (pin == 3) {
     if (between) { // between 3 and 0
-      turn(&m_left, 1);
+      turn(&m_left, 8);
     } else {
-      turn(&m_left, 2);
+      turn(&m_left, 16);
     }
   }
-  run_motors(&m_forward);
-  while (!detect_distance()) {}
+  //run_motors(&m_forward);
+  //while (!detect_min_distance()) {}
   run_motors(&m_stop);
 }
 

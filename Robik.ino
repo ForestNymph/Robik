@@ -12,6 +12,7 @@
 // capable to verify the distance from objects
 // To change modes set true or false value for 'robot_remote_control'
 #define robot_remote_control false
+
 static void (*start_robic)();
 
 // #define runEvery(t) for (static typeof(t) last_time; (typeof(t))millis() - last_time >= (t); last_time += (t))
@@ -37,7 +38,7 @@ static PCF8574 expander;
 #define IN3 7 // right
 #define IN4 6 // right
 
-static int motors_speed = 80;
+static int motors_speed = 100;
 
 // struct describes full configuration of engines
 // like a speed and motors direction
@@ -72,10 +73,10 @@ static void reduce_speed();
 // (forward, backward, left, right, stop)
 static struct motors_config m_forward(HIGH, LOW, HIGH, LOW, motors_speed);
 static struct motors_config m_backward(LOW, HIGH, LOW, HIGH, motors_speed);
-static struct motors_config m_right(LOW, HIGH, HIGH, LOW, motors_speed);
-static struct motors_config m_left(HIGH, LOW, LOW, HIGH, motors_speed);
+static struct motors_config m_right(HIGH, LOW, LOW, HIGH, motors_speed);
+static struct motors_config m_left(LOW, HIGH, HIGH, LOW, motors_speed);
 // stop with state HIGH for PWM's is "fast brake"
-static struct motors_config m_stop(HIGH, HIGH, HIGH, HIGH, HIGH);
+static struct motors_config m_stop(LOW, LOW, LOW, LOW, HIGH);
 
 ///////// RED/YELLOW/GREEN LED //////////////////////////
 
@@ -96,8 +97,8 @@ static void green_led_off();
 // tv remote hex signals
 const unsigned long tv_up = 0xE0E006F9;
 const unsigned long tv_down = 0xE0E08679;
-const unsigned long tv_right = 0xE0E0A659;
-const unsigned long tv_left = 0xE0E046B9;
+const unsigned long tv_right = 0xE0E046B9;
+const unsigned long tv_left = 0xE0E0A659;
 // signal to stop motors
 const unsigned long tv_stop_engines = 0xE0E016E9;
 // signals to change speed of motors
@@ -350,10 +351,8 @@ static void detect_motion() {
       turn_to_motion_direction((*element).ID_sensor, false);
     }
     element = (*element).next;
-
-    delay(1000);
-
     green_led_off();
+    delay(1500);
   } while ((*(*element).prev).ID_sensor != 3);
 }
 
@@ -413,9 +412,11 @@ static void turn(motors_config* conf,
 
 static void run_motors(motors_config* conf) {
   digitalWrite(IN1, (*conf).in1);
-  digitalWrite(IN2, (*conf).in2);
   digitalWrite(IN3, (*conf).in3);
+    
+  digitalWrite(IN2, (*conf).in2);
   digitalWrite(IN4, (*conf).in4);
+  
   // speed range 0~255
   (*conf).update_speed();
 
@@ -455,7 +456,6 @@ static void calibrate_motion_sensors() {
   // http://forum.arduino.cc/index.php?topic=5313.0
   // Only disable internal pullup but this is not pull down
   expander.write(LOW);
-
   for (int i = 0; i < calibration_time_HCSR501; ++i) {
     delay(1000);
   }
@@ -465,28 +465,28 @@ static void calibrate_motion_sensors() {
 static void turn_to_motion_direction(int pin, bool between) {
   if (pin == 0) {
     if (between) { // between 0 and 1
-      turn(&m_right, 7);
+      turn(&m_right, 14);
     } else {
       // move detected in front of Robik
       // don't turn around just go forward
     }
   } else if (pin == 1) {
     if (between) { // between 1 and 2
-      turn(&m_right, 24);
+      turn(&m_right, 16);
     } else {
       turn(&m_right, 12);
     }
   } else if (pin == 2) {
     if (between) { // between 2 and 3
-      turn(&m_left, 24);
+      turn(&m_left, 14);
     } else {
-      turn(&m_right, 32);
+      turn(&m_right, 16);
     }
   } else if (pin == 3) {
     if (between) { // between 3 and 0
-      turn(&m_left, 8);
+      turn(&m_left, 14);
     } else {
-      turn(&m_left, 16);
+      turn(&m_left, 12);
     }
   }
   //run_motors(&m_forward);
@@ -530,6 +530,3 @@ static void green_led_off() {
 //    servo.write(i);
 //  }
 //}
-
-
-

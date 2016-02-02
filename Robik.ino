@@ -6,12 +6,13 @@
 
 #define debug false
 
-// Robic can operate in two different modes:
-// 1. A robot controlled by the user with remote control
-// 2. Self-propelled robot moving through the source of motion
+// Robic can operate in three different modes:
+// [0] A robot controlled by the user with remote control
+// [1] Self-propelled robot moving through the source of motion
 // capable to verify the distance from objects
-// To change modes set true or false value for 'robot_remote_control'
-#define robot_remote_control false
+// [2] A runaway robot, always keeps a specified distance
+// To change modes set a number [0, 1, 2] value for 'robot_mode'
+#define robot_mode 1
 
 static void (*start_robic)();
 
@@ -198,11 +199,13 @@ static void check_IR_signal();
 #define HC_SR04_TRIGGER 10
 #define HC_SR04_ECHO 12
 
-// minimum distance from object: 20 cm
-static long min_distance = 20;
+// minimum distance from object: 80 cm
+static long min_distance = 80;
 
 static bool detect_min_distance();
 static long convert_microsec_to_centimeters();
+
+static void detect_distance();
 
 ///////// MICRO SERVO TOWER PRO SG90 ////////////////////
 
@@ -239,13 +242,13 @@ void setup() {
   pinMode(HC_SR04_TRIGGER, OUTPUT);
   pinMode(HC_SR04_ECHO, INPUT);
 
-  if (robot_remote_control) {
+  if (robot_mode == 0) {
 
     // start the IR receiver
     irrecv.enableIRIn();
     start_robic = &detect_IR_signal;
 
-  } else {
+  } else if (robot_mode == 1) {
     // set expander on 0x20 adress, all bits on low state (pins to GND)
     // 0 1 0 0 A2 A1 A0 - (Ax) can be modify
     // lowest adress 0x20, highest 0x27 (32-39)
@@ -277,6 +280,8 @@ void setup() {
     // servo.attach(SERVO);
 
     start_robic = &detect_motion;
+  } else if (robot_mode == 3) {
+    start_robic = &detect_distance;
   }
 
   if (debug) {
@@ -287,6 +292,14 @@ void setup() {
 
 void loop() {
   (*start_robic)();
+}
+
+static void detect_distance() {
+  if (detect_min_distance()) {
+    run_motors(&m_backward);
+  } else {
+    run_motors(&m_forward);
+  }
 }
 
 static void detect_IR_signal() {
@@ -413,10 +426,10 @@ static void turn(motors_config* conf,
 static void run_motors(motors_config* conf) {
   digitalWrite(IN1, (*conf).in1);
   digitalWrite(IN3, (*conf).in3);
-    
+
   digitalWrite(IN2, (*conf).in2);
   digitalWrite(IN4, (*conf).in4);
-  
+
   // speed range 0~255
   (*conf).update_speed();
 

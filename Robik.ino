@@ -4,7 +4,7 @@
 #include "Wire.h"
 // #include <Servo.h>
 
-#define debug false
+#define debug true
 
 // Robic can operate in a four different modes:
 #define remote_turtle 0
@@ -18,11 +18,11 @@
 // [3] Robic becomes a moth and looks for a light source
 
 // To change mode set a name mode for 'robot_mode'
-#define robot_mode friendly_turtle
+#define robot_mode moth_turtle
 
 static void (*start_robic)();
 
-// #define runEvery(t) for (static typeof(t) last_time; (typeof(t))millis() - last_time >= (t); last_time += (t))
+#define runEvery(t) for (static typeof(t) last_time; (typeof(t))millis() - last_time >= (t); last_time += (t))
 
 ///////// EXPANDER PCF8574 //////////////////////////////
 
@@ -210,18 +210,42 @@ static long convert_microsec_to_centimeters();
 
 static void detect_distance();
 
-///////// PHOTORESISTOR GL5616 //////////////////////////
+///////// PHOTORESISTORS ////////////////////////////////
 
 #define PHOTORESISTOR_LEFT A4
 #define PHOTORESISTOR_RIGHT A5
 #define PHOTORESISTOR_CENTER A3
+// https://www.societyofrobots.com/schematics_photoresistor.shtml
 
-// sensor value needed to trigger an action
-static int left_tolerance = 800;
-static int right_tolerance = 800;
-static int center_tolerance = 800;
+// photoresistor tolerance is needed to trigger an action
+struct photoresistor_tolerance {
+  int initial_value = 0;
+  // tolerance_value is the light intensity in the environment
+  // value is setting during calibration
+  int *tolerance_value = &initial_value;
+  // each photoresistor has different sensitivity deviation of light
+  int light_intensity_deviation;
+
+  photoresistor_tolerance() {};
+  photoresistor_tolerance(int intensity) {
+    light_intensity_deviation = intensity;
+  }
+};
+
+// initialize tolerance of photoresistors
+static struct photoresistor_tolerance left_tolerance(10);  // 5-10 kΩ GL5616
+static struct photoresistor_tolerance right_tolerance(10); // 5-10 kΩ GL5516
+static struct photoresistor_tolerance center_tolerance(45);// 20-30 kΩ GL5537-1 resistor 11800 Ω
+
+static int photo_calibration_time = 5; // sec
 
 static void detect_light();
+static void calibrate_photoresistor(int);
+// get trigger tolerance of light intensity in the environment
+// exceeding this value starts respective motors
+static int get_light_tolerance(struct photoresistor_tolerance *photoresistor) {
+  return (*(*photoresistor).tolerance_value) + (*photoresistor).light_intensity_deviation;
+};
 
 ///////// MICRO SERVO TOWER PRO SG90 ////////////////////
 
@@ -301,6 +325,12 @@ void setup() {
     start_robic = &detect_distance;
 
   } else if (robot_mode == moth_turtle) {
+    pinMode(YELLOW_LED, OUTPUT);
+    analogWrite(YELLOW_LED, LOW);
+
+    calibrate_photoresistor(PHOTORESISTOR_LEFT);
+    calibrate_photoresistor(PHOTORESISTOR_RIGHT);
+    calibrate_photoresistor(PHOTORESISTOR_CENTER);
 
     start_robic = &detect_light;
   }
@@ -322,23 +352,32 @@ static void detect_light() {
   int light_from_center = analogRead(PHOTORESISTOR_CENTER);
 
   if (debug) {
-    Serial.print(F("Left: "));
-    Serial.println(light_from_left);
-    Serial.print(F("Right: "));
-    Serial.println(light_from_right);
-    Serial.print(F("Center: "));
-    Serial.println(light_from_center);
+    runEvery(500) {
+      Serial.print(F("Left: "));
+      Serial.println(light_from_left);
+      Serial.println(get_light_tolerance(&left_tolerance));
+      Serial.print(F("Right: "));
+      Serial.println(light_from_right);
+      Serial.println(get_light_tolerance(&right_tolerance));
+      Serial.print(F("Center: "));
+      Serial.println(light_from_center);
+      Serial.println(get_light_tolerance(&center_tolerance));
+    }
   }
 
-  if (light_from_center > center_tolerance) {
-    run_motors_with_distance(&m_forward, 8);
+  if (light_from_center >= get_light_tolerance(&center_tolerance))  {
+    run_motors(&m_forward);
+    delay(200);
   }
-  if (light_from_right > right_tolerance) {
-    run_motors_with_distance(&m_right, 8);
+  if (light_from_right >= get_light_tolerance(&right_tolerance)) {
+    run_motors(&m_right);
+    delay(200);
   }
-  if (light_from_left > left_tolerance) {
-    run_motors_with_distance(&m_left, 8);
+  if (light_from_left >= get_light_tolerance(&left_tolerance)) {
+    run_motors(&m_left);
+    delay(200);
   }
+  run_motors(&m_stop);
 }
 
 static void detect_distance() {
@@ -527,7 +566,7 @@ static void turn_to_motion_direction(int pin, bool between) {
 // calibrate HCSR501 sensor
 // set INPUT mode for digtal pins on expander
 static void calibrate_motion_sensors() {
-  digitalWrite(YELLOW_LED, 255);
+  digitalWrite(YELLOW_LED, HIGH);
   expander.pinMode(MOTION_0, INPUT);
   expander.pinMode(MOTION_1, INPUT);
   expander.pinMode(MOTION_2, INPUT);
@@ -542,7 +581,29 @@ static void calibrate_motion_sensors() {
   for (int i = 0; i < calibration_time_HCSR501; ++i) {
     delay(1000);
   }
-  digitalWrite(YELLOW_LED, 0);
+  digitalWrite(YELLOW_LED, LOW);
+}
+
+static void calibrate_photoresistor(int pin) {
+
+  digitalWrite(YELLOW_LED, HIGH);
+  int average_light_value = 0;
+
+  for (int i = 0; i < photo_calibration_time; ++i) {
+    average_light_value += analogRead(pin);
+    delay(1000);
+  }
+  int *photo_resistor = 0;
+  if (pin == PHOTORESISTOR_LEFT) {
+    photo_resistor = left_tolerance.tolerance_value;
+  } else if (pin == PHOTORESISTOR_RIGHT) {
+    photo_resistor = right_tolerance.tolerance_value;
+  } else if (pin == PHOTORESISTOR_CENTER) {
+    photo_resistor = center_tolerance.tolerance_value;
+  }
+  // calculate the average light intensity in environment for each resistor
+  *photo_resistor = (average_light_value / photo_calibration_time);
+  digitalWrite(YELLOW_LED, LOW);
 }
 
 static void boost_speed() {
@@ -601,3 +662,4 @@ static void green_led_off() {
 //    servo.write(i);
 //  }
 //}
+

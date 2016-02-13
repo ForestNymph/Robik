@@ -4,23 +4,24 @@
 #include "Wire.h"
 // #include <Servo.h>
 
-#define debug true
+#define debug false
 
-// Robic can operate in a four different modes:
-#define remote_turtle 0
+// Robik can operate in a four different modes:
+
 // [0] A robot controlled by the user with remote control
-#define friendly_turtle 1
+#define remote_robik 0
 // [1] Self-propelled robot moving through the source of motion
 // capable to verify the distance from objects
-#define shy_turtle 2
+#define friendly_robik 1
 // [2] A runaway robot, always keeps a specified distance
-#define moth_turtle 3
-// [3] Robic becomes a moth and looks for a light source
+#define shy_robik 2
+// [3] robik becomes a moth and looks for a light source
+#define moth_robik 3
 
 // To change mode set a name mode for 'robot_mode'
-#define robot_mode moth_turtle
+#define robot_mode moth_robik
 
-static void (*start_robic)();
+static void (*start_robik)();
 
 #define runEvery(t) for (static typeof(t) last_time; (typeof(t))millis() - last_time >= (t); last_time += (t))
 
@@ -45,7 +46,7 @@ static PCF8574 expander;
 #define IN3 7 // right
 #define IN4 6 // right
 
-static int motors_speed = 120;
+static int motors_speed = 180;
 
 // struct describes full configuration of engines
 // like a speed and motors direction
@@ -232,15 +233,21 @@ struct photoresistor_tolerance {
   }
 };
 
+static int light_from_left = 0;
+static int light_from_right = 0;
+static int light_from_center = 0;
+
 // initialize tolerance of photoresistors
-static struct photoresistor_tolerance left_tolerance(10);  // 5-10 kΩ GL5616
-static struct photoresistor_tolerance right_tolerance(10); // 5-10 kΩ GL5516
+static struct photoresistor_tolerance left_tolerance(15);  // 5-10 kΩ GL5616
+static struct photoresistor_tolerance right_tolerance(15); // 5-10 kΩ GL5516
 static struct photoresistor_tolerance center_tolerance(45);// 20-30 kΩ GL5537-1 resistor 11800 Ω
 
 static int photo_calibration_time = 5; // sec
 
 static void detect_light();
 static void calibrate_photoresistor(int);
+// reduce noises and interferences from environment
+static void reduce_interferences();
 // get trigger tolerance of light intensity in the environment
 // exceeding this value starts respective motors
 static int get_light_tolerance(struct photoresistor_tolerance *photoresistor) {
@@ -280,13 +287,13 @@ void setup() {
   pinMode(HC_SR04_TRIGGER, OUTPUT);
   pinMode(HC_SR04_ECHO, INPUT);
 
-  if (robot_mode == remote_turtle) {
+  if (robot_mode == remote_robik) {
 
     // start the IR receiver
     irrecv.enableIRIn();
-    start_robic = &detect_IR_signal;
+    start_robik = &detect_IR_signal;
 
-  } else if (robot_mode == friendly_turtle) {
+  } else if (robot_mode == friendly_robik) {
 
     // set expander on 0x20 adress, all bits on low state (pins to GND)
     // 0 1 0 0 A2 A1 A0 - (Ax) can be modify
@@ -318,13 +325,13 @@ void setup() {
     // set pin for servo
     // servo.attach(SERVO);
 
-    start_robic = &detect_motion;
+    start_robik = &detect_motion;
 
-  } else if (robot_mode == shy_turtle) {
+  } else if (robot_mode == shy_robik) {
 
-    start_robic = &detect_distance;
+    start_robik = &detect_distance;
 
-  } else if (robot_mode == moth_turtle) {
+  } else if (robot_mode == moth_robik) {
     pinMode(YELLOW_LED, OUTPUT);
     analogWrite(YELLOW_LED, LOW);
 
@@ -332,7 +339,7 @@ void setup() {
     calibrate_photoresistor(PHOTORESISTOR_RIGHT);
     calibrate_photoresistor(PHOTORESISTOR_CENTER);
 
-    start_robic = &detect_light;
+    start_robik = &detect_light;
   }
 
   if (debug) {
@@ -342,14 +349,12 @@ void setup() {
 }
 
 void loop() {
-  (*start_robic)();
+  (*start_robik)();
 }
 
 static void detect_light() {
 
-  int light_from_left = analogRead(PHOTORESISTOR_LEFT);
-  int light_from_right = analogRead(PHOTORESISTOR_RIGHT);
-  int light_from_center = analogRead(PHOTORESISTOR_CENTER);
+  reduce_interferences();
 
   if (debug) {
     runEvery(500) {
@@ -378,6 +383,21 @@ static void detect_light() {
     delay(200);
   }
   run_motors(&m_stop);
+}
+
+static void reduce_interferences() {
+  // simple low-pass filter 
+  int left = 0, right = 0, center = 0;
+  byte probe = 3;
+  for (int i = 0; i < probe; ++i) {
+    left = left + analogRead(PHOTORESISTOR_LEFT);
+    right = right + analogRead(PHOTORESISTOR_RIGHT);
+    center = center + analogRead(PHOTORESISTOR_CENTER);
+    delay(3);
+  }
+  light_from_left = left / probe;
+  light_from_right = right / probe;
+  light_from_center = center / probe;
 }
 
 static void detect_distance() {
@@ -662,4 +682,5 @@ static void green_led_off() {
 //    servo.write(i);
 //  }
 //}
+
 

@@ -46,7 +46,7 @@ static PCF8574 expander;
 #define IN3 7 // right
 #define IN4 6 // right
 
-static int motors_speed = 160;
+static int motors_speed = 150;
 
 // struct describes full configuration of engines
 // like a speed and motors direction

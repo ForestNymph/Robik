@@ -8,14 +8,14 @@
 
 // Robik can operate in a four different modes:
 
-// [0] A robot controlled by the user with remote control
+// [0] A robot controlled by user with remote control
 #define remote_robik 0
 // [1] Self-propelled robot moving through the source of motion
 // capable to verify the distance from objects
 #define friendly_robik 1
-// [2] A runaway robot, always keeps a specified distance
-#define shy_robik 2
-// [3] robik becomes a moth and looks for a light source
+// [2] A freely moving around the place and avoiding obstacles
+#define free_robik 2
+// [3] Robik becomes a moth and looks for a flashlight source
 #define moth_robik 3
 
 // To change mode set a name mode for 'robot_mode'
@@ -46,7 +46,7 @@ static PCF8574 expander;
 #define IN3 7 // right
 #define IN4 6 // right
 
-static int motors_speed = 180;
+static int motors_speed = 160;
 
 // struct describes full configuration of engines
 // like a speed and motors direction
@@ -203,20 +203,20 @@ static void check_IR_signal();
 #define HC_SR04_TRIGGER 10
 #define HC_SR04_ECHO 12
 
-// minimum distance from object: 20 cm
-static long min_distance = 20;
+// minimum distance from object: 25 cm
+static long min_distance = 25;
 
 static bool detected_min_distance();
 static long convert_microsec_to_centimeters();
 
-static void detect_distance();
+static void action_based_on_distance();
 
 ///////// PHOTORESISTORS ////////////////////////////////
 
 #define PHOTORESISTOR_LEFT A4
 #define PHOTORESISTOR_RIGHT A5
 #define PHOTORESISTOR_CENTER A3
-// https://www.societyofrobots.com/schematics_photoresistor.shtml
+// https://www.societyofrobots.com/schematics_photoresistor.html
 
 // photoresistor tolerance is needed to trigger an action
 struct photoresistor_tolerance {
@@ -284,9 +284,6 @@ void setup() {
   analogWrite(LEFT_ENGINE_SPEED, 0);
   analogWrite(RIGHT_ENGINE_SPEED, 0);
 
-  pinMode(HC_SR04_TRIGGER, OUTPUT);
-  pinMode(HC_SR04_ECHO, INPUT);
-
   if (robot_mode == remote_robik) {
 
     // start the IR receiver
@@ -294,6 +291,9 @@ void setup() {
     start_robik = &detect_IR_signal;
 
   } else if (robot_mode == friendly_robik) {
+
+    pinMode(HC_SR04_TRIGGER, OUTPUT);
+    pinMode(HC_SR04_ECHO, INPUT);
 
     // set expander on 0x20 adress, all bits on low state (pins to GND)
     // 0 1 0 0 A2 A1 A0 - (Ax) can be modify
@@ -327,9 +327,12 @@ void setup() {
 
     start_robik = &detect_motion;
 
-  } else if (robot_mode == shy_robik) {
+  } else if (robot_mode == free_robik) {
 
-    start_robik = &detect_distance;
+    pinMode(HC_SR04_TRIGGER, OUTPUT);
+    pinMode(HC_SR04_ECHO, INPUT);
+
+    start_robik = &action_based_on_distance;
 
   } else if (robot_mode == moth_robik) {
     pinMode(YELLOW_LED, OUTPUT);
@@ -386,13 +389,13 @@ static void detect_light() {
 }
 
 static void reduce_interferences() {
-  // simple low-pass filter 
+  // simple low-pass filter
   int left = 0, right = 0, center = 0;
   byte probe = 3;
   for (int i = 0; i < probe; ++i) {
-    left = left + analogRead(PHOTORESISTOR_LEFT);
-    right = right + analogRead(PHOTORESISTOR_RIGHT);
-    center = center + analogRead(PHOTORESISTOR_CENTER);
+    left += analogRead(PHOTORESISTOR_LEFT);
+    right += analogRead(PHOTORESISTOR_RIGHT);
+    center += analogRead(PHOTORESISTOR_CENTER);
     delay(3);
   }
   light_from_left = left / probe;
@@ -400,9 +403,13 @@ static void reduce_interferences() {
   light_from_center = center / probe;
 }
 
-static void detect_distance() {
+static void action_based_on_distance() {
   if (detected_min_distance()) {
-    run_motors(&m_backward);
+    run_motors(random(0, 2) == 0 ? &m_right : &m_left);
+    delay(random(500, 1000));
+    // stop to get the correct measurements
+    run_motors(&m_stop);
+    delay(300);
   } else {
     run_motors(&m_forward);
   }
@@ -545,7 +552,7 @@ static void run_motors_with_distance(motors_config* conf,
     run_motors(&m_backward);
     // delay because motion sensors
     // need time to get LOW state
-    delay(1000);
+    delay(500);
   }
   run_motors(&m_stop);
 }

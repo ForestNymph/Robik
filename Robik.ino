@@ -37,39 +37,33 @@ static PCF8574 expander;
 ///////// L298 MOTOR DRIVER /////////////////////////////
 
 // motor controller digital pins
-// PWM pins for both wheels pin 5 because
-// the speed is always the same (for both)
 #define LEFT_ENGINE_SPEED 5
-#define RIGHT_ENGINE_SPEED 5
-#define IN1 9 // left
+#define RIGHT_ENGINE_SPEED 9
+#define IN1 A0 // left
 #define IN2 8 // left
-#define IN3 7 // right
+#define IN3 A1 // right
 #define IN4 6 // right
 
-static int motors_speed = 150;
+// different values for motors to calibrate them
+static int motor_speed_left = 160;
+static int motor_speed_right = 159;
 
 // struct describes full configuration of engines
 // like a speed and motors direction
 struct motors_config {
 
   byte in1, in2, in3, in4;
-  int speed1, speed2;
+  byte fast_break;
 
   motors_config() {};
 
-  motors_config(byte l1, byte l2, byte r1, byte r2,
-                int speed_lr) {
+  motors_config(byte l1, byte l2, byte r1, byte r2, byte f_break = 0) {
     in1 = l1;
     in2 = l2;
     in3 = r1;
     in4 = r2;
-    speed1 = speed_lr;
-    speed2 = speed_lr;
-  }
 
-  void update_speed() {
-    speed1 = motors_speed;
-    speed2 = motors_speed;
+    fast_break = f_break;
   }
 };
 
@@ -80,24 +74,24 @@ static void reduce_speed();
 
 // initialize 5 capabilities for motors config
 // (forward, backward, left, right, stop)
-static struct motors_config m_forward(HIGH, LOW, HIGH, LOW, motors_speed);
-static struct motors_config m_backward(LOW, HIGH, LOW, HIGH, motors_speed);
-static struct motors_config m_right(HIGH, LOW, LOW, HIGH, motors_speed);
-static struct motors_config m_left(LOW, HIGH, HIGH, LOW, motors_speed);
+static struct motors_config m_forward(HIGH, LOW, HIGH, LOW);
+static struct motors_config m_backward(LOW, HIGH, LOW, HIGH);
+static struct motors_config m_right(HIGH, LOW, LOW, HIGH);
+static struct motors_config m_left(LOW, HIGH, HIGH, LOW);
 // stop with state HIGH for PWM's is "fast brake"
-static struct motors_config m_stop(LOW, LOW, LOW, LOW, HIGH);
+static struct motors_config m_stop(LOW, LOW, LOW, LOW, 1);
 
 ///////// RED/YELLOW/GREEN LED //////////////////////////
 
 #define RED_LED 13
 #define YELLOW_LED A2
 
-#define GREEN_LED_3 A0
-#define GREEN_LED_1 A1
+// #define GREEN_LED_3 A0
+// #define GREEN_LED_1 A1
 
 static void blink_red_led();
-static void green_led_on(int);
-static void green_led_off();
+// static void green_led_on(int);
+// static void green_led_off();
 
 ///////// HEX CODED TV REMOTE SIGNALS ///////////////////
 
@@ -216,7 +210,7 @@ static void action_based_on_distance();
 #define PHOTORESISTOR_LEFT A4
 #define PHOTORESISTOR_RIGHT A5
 #define PHOTORESISTOR_CENTER A3
-// https://www.societyofrobots.com/schematics_photoresistor.html
+// https://www.societyofrobots.com/schematics_photoresistor.shtml
 
 // photoresistor tolerance is needed to trigger an action
 struct photoresistor_tolerance {
@@ -238,9 +232,9 @@ static int light_from_right = 0;
 static int light_from_center = 0;
 
 // initialize tolerance of photoresistors
-static struct photoresistor_tolerance left_tolerance(15);  // 5-10 kΩ GL5616
-static struct photoresistor_tolerance right_tolerance(15); // 5-10 kΩ GL5516
-static struct photoresistor_tolerance center_tolerance(45);// 20-30 kΩ GL5537-1 resistor 11800 Ω
+static struct photoresistor_tolerance left_tolerance(10);  // 5-10 kΩ GL5616
+static struct photoresistor_tolerance right_tolerance(10); // 5-10 kΩ GL5516
+static struct photoresistor_tolerance center_tolerance(25);// 20-30 kΩ GL5537-1 resistor 11800 Ω
 
 static int photo_calibration_time = 5; // sec
 
@@ -310,8 +304,8 @@ void setup() {
     digitalWrite(ENCODER_WHEEL, HIGH);
 
     // mode for led 1 and 3 connected to analog pin
-    pinMode(GREEN_LED_1, OUTPUT);
-    pinMode(GREEN_LED_3, OUTPUT);
+    // pinMode(GREEN_LED_1, OUTPUT);
+    // pinMode(GREEN_LED_3, OUTPUT);
 
     // HCSR501 calibration
     calibrate_motion_sensors();
@@ -473,11 +467,11 @@ static void detect_motion() {
       }
       // if motion detected by one of the sensors
     } else if (motion_detected((*element).pin_sensor)) {
-      green_led_on((*element).ID_sensor);
+      // green_led_on((*element).ID_sensor);
       turn_to_motion_direction((*element).ID_sensor, false);
     }
     element = (*element).next;
-    green_led_off();
+    // green_led_off();
     delay(1500);
   } while ((*(*element).prev).ID_sensor != 3);
 }
@@ -522,11 +516,13 @@ static void run_motors(motors_config* conf) {
   digitalWrite(IN2, (*conf).in2);
   digitalWrite(IN4, (*conf).in4);
 
-  // speed range 0~255
-  (*conf).update_speed();
-
-  analogWrite(LEFT_ENGINE_SPEED, (*conf).speed1);
-  analogWrite(RIGHT_ENGINE_SPEED, (*conf).speed2);
+  if ((*conf).fast_break) {
+    analogWrite(LEFT_ENGINE_SPEED, HIGH);
+    analogWrite(RIGHT_ENGINE_SPEED, HIGH);
+  } else {
+    analogWrite(LEFT_ENGINE_SPEED, motor_speed_left);
+    analogWrite(RIGHT_ENGINE_SPEED, motor_speed_right);
+  }
 }
 
 // number_encoder_pulses
@@ -535,7 +531,8 @@ static void run_motors(motors_config* conf) {
 static void run_motors_with_distance(motors_config* conf,
                                      int number_encoder_pulses) {
   int encoder_turn_count = 0;
-  byte new_state, old_state = digitalRead(ENCODER_WHEEL);
+  byte new_state = digitalRead(ENCODER_WHEEL);
+  byte old_state = digitalRead(ENCODER_WHEEL);
   run_motors(conf);
   while (!detected_min_distance()) {
     if (new_state != old_state) {
@@ -547,11 +544,9 @@ static void run_motors_with_distance(motors_config* conf,
     }
     new_state = digitalRead(ENCODER_WHEEL);
   }
-  // if min distance detected move backward by 1 second
+  // if min distance detected move backward by 0.5 second
   if (detected_min_distance()) {
     run_motors(&m_backward);
-    // delay because motion sensors
-    // need time to get LOW state
     delay(500);
   }
   run_motors(&m_stop);
@@ -560,34 +555,37 @@ static void run_motors_with_distance(motors_config* conf,
 static void turn_to_motion_direction(int pin, bool between) {
   if (pin == 0) {
     if (between) { // between 0 and 1
-      run_motors_with_distance(&m_right, 14);
+      run_motors_with_distance(&m_right, 8);
     } else {
       // move detected in front of Robik
       // don't turn around just go forward
     }
   } else if (pin == 1) {
     if (between) { // between 1 and 2
-      run_motors_with_distance(&m_right, 16);
+      run_motors_with_distance(&m_right, 8);
     } else {
-      run_motors_with_distance(&m_right, 12);
+      run_motors_with_distance(&m_right, 8);
     }
   } else if (pin == 2) {
     if (between) { // between 2 and 3
-      run_motors_with_distance(&m_left, 14);
+      run_motors_with_distance(&m_left, 8);
     } else {
-      run_motors_with_distance(&m_right, 16);
+      run_motors_with_distance(&m_right, 8);
     }
   } else if (pin == 3) {
     if (between) { // between 3 and 0
-      run_motors_with_distance(&m_left, 14);
+      run_motors_with_distance(&m_left, 8);
     } else {
-      run_motors_with_distance(&m_left, 12);
+      run_motors_with_distance(&m_left, 8);
     }
   }
   // after turn always go forward specified distance
   // and then stop
-  run_motors_with_distance(&m_forward, 16);
+  run_motors_with_distance(&m_forward, 8);
   run_motors(&m_stop);
+  // delay because motion sensors
+  // need time to get LOW state
+  delay(1500);
 }
 
 // calibrate HCSR501 sensor
@@ -636,20 +634,22 @@ static void calibrate_photoresistor(int pin) {
 static void boost_speed() {
   // usable range 35 - 255;
   // change of 20
-  if ((motors_speed + 20) > 255) {
+  if ((motor_speed_left + 20) > 255 && (motor_speed_right + 20) > 255) {
   } else {
+    motor_speed_right += 20;
+    motor_speed_left += 20;
     blink_red_led();
-    motors_speed += 20;
   }
 }
 
 static void reduce_speed() {
   // usable range 35 - 255
   // change of 20
-  if ((motors_speed - 20) < 35) {
+  if ((motor_speed_left - 20) < 35 && (motor_speed_right - 20) < 35) {
   } else {
+    motor_speed_right -= 20;
+    motor_speed_left -= 20;
     blink_red_led();
-    motors_speed -= 20;
   }
 }
 
@@ -660,24 +660,24 @@ static void blink_red_led() {
   delay(100);
 }
 
-static void green_led_on(int pin) {
-  if (pin == 3) {
-    digitalWrite(GREEN_LED_3, HIGH);
-  } else if (pin == 1) {
-    digitalWrite(GREEN_LED_1, HIGH);
-  } /*else if (pin == 2) {
-    digitalWrite(GREEN_LED_2, HIGH);
-  } else if (pin == 3) {
-    digitalWrite/(GREEN_LED_3, HIGH);
-  }*/
-}
+//static void green_led_on(int pin) {
+//if (pin == 3) {
+//  digitalWrite(GREEN_LED_3, HIGH);
+//} else if (pin == 1) {
+//  digitalWrite(GREEN_LED_1, HIGH);
+//} else if (pin == 2) {
+//  digitalWrite(GREEN_LED_2, HIGH);
+//} else if (pin == 3) {
+//  digitalWrite/(GREEN_LED_3, HIGH);
+//}
+//}
 
-static void green_led_off() {
-  digitalWrite(GREEN_LED_1, LOW);
-  digitalWrite(GREEN_LED_3, LOW);
-  // digitalWrite(GREEN_LED_2, LOW);
-  // digitalWrite(GREEN_LED_0, LOW);
-}
+// static void green_led_off() {
+// digitalWrite(GREEN_LED_1, LOW);
+// digitalWrite(GREEN_LED_3, LOW);
+// digitalWrite(GREEN_LED_2, LOW);
+// digitalWrite(GREEN_LED_0, LOW);
+// }
 
 //static void run_servo() {
 //  for (int i = 20; i < 110; ++i) {

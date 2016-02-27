@@ -26,6 +26,10 @@ static void (*start_robik)();
 
 #define runEvery(t) for (static typeof(t) last_time; (typeof(t))millis() - last_time >= (t); last_time += (t))
 
+static int action_time = 0;
+// every 3 minutes of idle state play a random melody
+//#define runMelody(180000)(action_time; millis() - action_time > );
+
 ///////// EXPANDER PCF8574 //////////////////////////////
 
 // digital expander

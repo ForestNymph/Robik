@@ -2,6 +2,7 @@
 #include <IRremote.h>
 #include "PCF8574.h"
 #include "Wire.h"
+#include "BuzzerMelody.h"
 // #include <Servo.h>
 
 #define debug false
@@ -19,7 +20,7 @@
 #define moth_robik 3
 
 // To change mode set a name mode for 'robot_mode'
-#define robot_mode moth_robik
+#define robot_mode remote_robik
 
 static void (*start_robik)();
 
@@ -44,12 +45,13 @@ static PCF8574 expander;
 #define IN3 A1 // right
 #define IN4 6 // right
 
-// different values for motors to calibrate them
+// different values for motors to work in the same way (same speed)
+// (cheap yellow dagu motors)
 static int motor_speed_left = 160;
 static int motor_speed_right = 159;
 
-// struct describes full configuration of engines
-// like a speed and motors direction
+// struct describes configuration
+// like a motors direction
 struct motors_config {
 
   byte in1, in2, in3, in4;
@@ -78,7 +80,6 @@ static struct motors_config m_forward(HIGH, LOW, HIGH, LOW);
 static struct motors_config m_backward(LOW, HIGH, LOW, HIGH);
 static struct motors_config m_right(HIGH, LOW, LOW, HIGH);
 static struct motors_config m_left(LOW, HIGH, HIGH, LOW);
-// stop with state HIGH for PWM's is "fast brake"
 static struct motors_config m_stop(LOW, LOW, LOW, LOW, 1);
 
 ///////// RED/YELLOW/GREEN LED //////////////////////////
@@ -129,7 +130,7 @@ static unsigned long signal_code = 0x00000000;
 // changing state of the pin
 // In this case interrupts are not needed
 
-#define ENCODER_WHEEL 4
+#define ENCODER_WHEEL 7
 
 ///////// MOTION SENSOR HCSR501 (expander) //////////////
 
@@ -232,9 +233,9 @@ static int light_from_right = 0;
 static int light_from_center = 0;
 
 // initialize tolerance of photoresistors
-static struct photoresistor_tolerance left_tolerance(10);  // 5-10 kΩ GL5616
-static struct photoresistor_tolerance right_tolerance(10); // 5-10 kΩ GL5516
-static struct photoresistor_tolerance center_tolerance(25);// 20-30 kΩ GL5537-1 resistor 11800 Ω
+static struct photoresistor_tolerance left_tolerance(15);  // 5-10 kΩ GL5616
+static struct photoresistor_tolerance right_tolerance(15); // 5-10 kΩ GL5516
+static struct photoresistor_tolerance center_tolerance(45);// 20-30 kΩ GL5537-1 resistor 11800 Ω
 
 static int photo_calibration_time = 5; // sec
 
@@ -247,6 +248,10 @@ static void reduce_interferences();
 static int get_light_tolerance(struct photoresistor_tolerance *photoresistor) {
   return (*(*photoresistor).tolerance_value) + (*photoresistor).light_intensity_deviation;
 };
+
+///////// BUZZER PIEZZO /////////////////////////////////
+
+#define BUZZER 4
 
 ///////// MICRO SERVO TOWER PRO SG90 ////////////////////
 
@@ -339,6 +344,11 @@ void setup() {
     start_robik = &detect_light;
   }
 
+  ////// BuzzerMelody.h ///////
+  pinMode(BUZZER, OUTPUT);
+  set_pin(BUZZER);
+  /////////////////////////////
+
   if (debug) {
     Serial.begin(9600);
     Serial.println(F("Debug ON"));
@@ -347,6 +357,9 @@ void setup() {
 
 void loop() {
   (*start_robik)();
+  ////// BuzzerMelody.h ///////
+  play_random_song();
+  /////////////////////////////
 }
 
 static void detect_light() {
@@ -516,6 +529,7 @@ static void run_motors(motors_config* conf) {
   digitalWrite(IN2, (*conf).in2);
   digitalWrite(IN4, (*conf).in4);
 
+  // stop with state HIGH for PWM's is "fast brake"
   if ((*conf).fast_break) {
     analogWrite(LEFT_ENGINE_SPEED, HIGH);
     analogWrite(RIGHT_ENGINE_SPEED, HIGH);
@@ -555,37 +569,37 @@ static void run_motors_with_distance(motors_config* conf,
 static void turn_to_motion_direction(int pin, bool between) {
   if (pin == 0) {
     if (between) { // between 0 and 1
-      run_motors_with_distance(&m_right, 8);
+      run_motors_with_distance(&m_right, 4);
     } else {
       // move detected in front of Robik
       // don't turn around just go forward
     }
   } else if (pin == 1) {
     if (between) { // between 1 and 2
-      run_motors_with_distance(&m_right, 8);
+      run_motors_with_distance(&m_right, 4);
     } else {
-      run_motors_with_distance(&m_right, 8);
+      run_motors_with_distance(&m_right, 4);
     }
   } else if (pin == 2) {
     if (between) { // between 2 and 3
-      run_motors_with_distance(&m_left, 8);
+      run_motors_with_distance(&m_left, 4);
     } else {
-      run_motors_with_distance(&m_right, 8);
+      run_motors_with_distance(&m_right, 4);
     }
   } else if (pin == 3) {
     if (between) { // between 3 and 0
-      run_motors_with_distance(&m_left, 8);
+      run_motors_with_distance(&m_left, 4);
     } else {
-      run_motors_with_distance(&m_left, 8);
+      run_motors_with_distance(&m_left, 4);
     }
   }
   // after turn always go forward specified distance
   // and then stop
-  run_motors_with_distance(&m_forward, 8);
+  run_motors_with_distance(&m_forward, 4);
   run_motors(&m_stop);
   // delay because motion sensors
   // need time to get LOW state
-  delay(1500);
+  delay(2500);
 }
 
 // calibrate HCSR501 sensor
@@ -634,8 +648,7 @@ static void calibrate_photoresistor(int pin) {
 static void boost_speed() {
   // usable range 35 - 255;
   // change of 20
-  if ((motor_speed_left + 20) > 255 && (motor_speed_right + 20) > 255) {
-  } else {
+  if ((motor_speed_left + 20) < 255 && (motor_speed_right + 20) < 255) {
     motor_speed_right += 20;
     motor_speed_left += 20;
     blink_red_led();
@@ -645,8 +658,7 @@ static void boost_speed() {
 static void reduce_speed() {
   // usable range 35 - 255
   // change of 20
-  if ((motor_speed_left - 20) < 35 && (motor_speed_right - 20) < 35) {
-  } else {
+  if ((motor_speed_left - 20) > 35 && (motor_speed_right - 20) > 35) {
     motor_speed_right -= 20;
     motor_speed_left -= 20;
     blink_red_led();

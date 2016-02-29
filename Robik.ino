@@ -26,10 +26,6 @@ static void (*start_robik)();
 
 #define runEvery(t) for (static typeof(t) last_time; (typeof(t))millis() - last_time >= (t); last_time += (t))
 
-static int action_time = 0;
-// every 3 minutes of idle state play a random melody
-//#define runMelody(180000)(action_time; millis() - action_time > );
-
 ///////// EXPANDER PCF8574 //////////////////////////////
 
 // digital expander
@@ -257,6 +253,21 @@ static int get_light_tolerance(struct photoresistor_tolerance *photoresistor) {
 
 #define BUZZER 4
 
+// how often melody should be played
+// every 30 seconds of idle state
+static unsigned long time_delay =  30 * 1000;
+static unsigned long pressed_time = 0;
+static bool pressed = false;
+
+// every time_delay miliseconds of idle state - play a random melody
+static typeof(time_delay) action_time = 0;
+#define runMelody() for (action_time; \
+                        (typeof(time_delay))millis() - action_time >= (time_delay); \
+                         action_time += (time_delay))
+
+// if all conditions have been met, play random melody
+static void play_melody();
+
 ///////// MICRO SERVO TOWER PRO SG90 ////////////////////
 
 // doc. Using Servo library
@@ -351,6 +362,7 @@ void setup() {
   ////// BuzzerMelody.h ///////
   pinMode(BUZZER, OUTPUT);
   set_pin(BUZZER);
+  //randomSeed();
   /////////////////////////////
 
   if (debug) {
@@ -361,9 +373,6 @@ void setup() {
 
 void loop() {
   (*start_robik)();
-  ////// BuzzerMelody.h ///////
-  play_random_song();
-  /////////////////////////////
 }
 
 static void detect_light() {
@@ -435,6 +444,8 @@ static void detect_IR_signal() {
     check_IR_signal();
     // take next value
     irrecv.resume();
+  } else {
+    play_melody();
   }
 }
 
@@ -445,22 +456,50 @@ static void check_IR_signal() {
   if (signal_code == tv_up) {
     blink_red_led();
     run_motors(&m_forward);
+    pressed_time = millis() + time_delay;
+    pressed = true;
   } else if (signal_code == tv_down) {
     blink_red_led();
     run_motors(&m_backward);
+    pressed_time = millis() + time_delay;
+    pressed = true;
   } else if (signal_code == tv_left) {
     blink_red_led();
     run_motors(&m_left);
+    pressed_time = millis() + time_delay;
+    pressed = true;
   } else if (signal_code == tv_right) {
     blink_red_led();
     run_motors(&m_right);
+    pressed_time = millis() + time_delay;
+    pressed = true;
   } else if (signal_code == tv_stop_engines) {
     blink_red_led();
     run_motors(&m_stop);
+    pressed_time = millis() + time_delay;
+    pressed = true;
   } else if (signal_code == tv_faster) {
     boost_speed();
+    pressed_time = millis() + time_delay;
+    pressed = true;
   } else if (signal_code == tv_slower) {
     reduce_speed();
+    pressed_time = millis() + time_delay;
+    pressed = true;
+  }
+}
+
+static void play_melody() {
+  if (pressed) {
+    if (millis() >= pressed_time) {
+      play_random_melody();
+      action_time = millis();
+      pressed = false;
+    }
+  } else {
+    runMelody(){
+      play_random_melody();
+    }
   }
 }
 

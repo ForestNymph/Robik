@@ -97,7 +97,7 @@ inline void set_pin(byte pin) {
   TONE_PIN = pin;
 }
 
-inline void play_random_song() {
+inline void play_random_melody() {
   byte nr = random(0, 8);
   strcpy_P(buffer, (char*)pgm_read_word(&(songs[nr])));
   play_rtttl(buffer);

@@ -262,11 +262,12 @@ static bool pressed = false;
 // every time_delay miliseconds of idle state - play a random melody
 static typeof(time_delay) action_time = 0;
 #define runMelody() for (action_time; \
-                        (typeof(time_delay))millis() - action_time >= (time_delay); \
+                         (typeof(time_delay))millis() - action_time >= (time_delay); \
                          action_time += (time_delay))
 
 // if all conditions have been met, play random melody
 static void play_melody();
+static void set_pressed_config();
 
 ///////// MICRO SERVO TOWER PRO SG90 ////////////////////
 
@@ -303,6 +304,11 @@ void setup() {
     // start the IR receiver
     irrecv.enableIRIn();
     start_robik = &detect_IR_signal;
+
+    pinMode(BUZZER, OUTPUT);
+    ////// BuzzerMelody.h ///////
+    set_pin(BUZZER);
+    /////////////////////////////
 
   } else if (robot_mode == friendly_robik) {
 
@@ -358,12 +364,6 @@ void setup() {
 
     start_robik = &detect_light;
   }
-
-  ////// BuzzerMelody.h ///////
-  pinMode(BUZZER, OUTPUT);
-  set_pin(BUZZER);
-  //randomSeed();
-  /////////////////////////////
 
   if (debug) {
     Serial.begin(9600);
@@ -456,36 +456,29 @@ static void check_IR_signal() {
   if (signal_code == tv_up) {
     blink_red_led();
     run_motors(&m_forward);
-    pressed_time = millis() + time_delay;
-    pressed = true;
+    set_pressed_config();
   } else if (signal_code == tv_down) {
     blink_red_led();
     run_motors(&m_backward);
-    pressed_time = millis() + time_delay;
-    pressed = true;
+    set_pressed_config();
   } else if (signal_code == tv_left) {
     blink_red_led();
     run_motors(&m_left);
-    pressed_time = millis() + time_delay;
-    pressed = true;
+    set_pressed_config();
   } else if (signal_code == tv_right) {
     blink_red_led();
     run_motors(&m_right);
-    pressed_time = millis() + time_delay;
-    pressed = true;
+    set_pressed_config();
   } else if (signal_code == tv_stop_engines) {
     blink_red_led();
     run_motors(&m_stop);
-    pressed_time = millis() + time_delay;
-    pressed = true;
+    set_pressed_config();
   } else if (signal_code == tv_faster) {
     boost_speed();
-    pressed_time = millis() + time_delay;
-    pressed = true;
+    set_pressed_config();
   } else if (signal_code == tv_slower) {
     reduce_speed();
-    pressed_time = millis() + time_delay;
-    pressed = true;
+    set_pressed_config();
   }
 }
 
@@ -493,14 +486,22 @@ static void play_melody() {
   if (pressed) {
     if (millis() >= pressed_time) {
       play_random_melody();
+      // set the time of the last end of melody
       action_time = millis();
       pressed = false;
     }
   } else {
-    runMelody(){
+    // if buttons not pressed play melody according to
+    // the specified interval
+    runMelody() {
       play_random_melody();
     }
   }
+}
+
+static void set_pressed_config() {
+  pressed_time = millis() + time_delay;
+  pressed = true;
 }
 
 static void detect_motion() {
@@ -744,5 +745,6 @@ static void blink_red_led() {
 //    servo.write(i);
 //  }
 //}
+
 
 

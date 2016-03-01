@@ -97,11 +97,27 @@ inline void set_pin(byte pin) {
   TONE_PIN = pin;
 }
 
+inline byte fake_rand(int val_start, int val_end){
+  Serial.println(analogRead(4));
+  Serial.println(analogRead(5));
+  Serial.println(analogRead(6));
+  Serial.println(analogRead(7));
+  Serial.println(analogRead(8));
+  unsigned long curr_time = micros();
+  while (curr_time >= val_end) {
+    curr_time /= 10;
+  }
+  Serial.print("random: ");
+  Serial.println(curr_time);
+  return curr_time;
+}
+
 inline void play_random_melody() {
-  byte nr = random(0, 8);
+  byte nr = fake_rand(0, 8);
   strcpy_P(buffer, (char*)pgm_read_word(&(songs[nr])));
   play_rtttl(buffer);
 }
+
 ///////////////////////////////////////////////
 
 void play_rtttl(const char *p) {
@@ -233,4 +249,5 @@ void play_rtttl(const char *p) {
     }
   }
 }
+
 

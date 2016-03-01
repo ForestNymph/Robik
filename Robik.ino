@@ -260,10 +260,8 @@ static unsigned long pressed_time = 0;
 static bool pressed = false;
 
 // every time_delay miliseconds of idle state - play a random melody
-static typeof(time_delay) action_time = 0;
-#define runMelody() for (action_time; \
-                         (typeof(time_delay))millis() - action_time >= (time_delay); \
-                         action_time += (time_delay))
+static typeof(time_delay) last_melody_time = 0;
+#define runMelody() for (last_melody_time; (typeof(time_delay))millis() - last_melody_time >= (time_delay);)
 
 // if all conditions have been met, play random melody
 static void play_melody();
@@ -485,16 +483,24 @@ static void check_IR_signal() {
 static void play_melody() {
   if (pressed) {
     if (millis() >= pressed_time) {
+      ////// BuzzerMelody.h ///////
       play_random_melody();
+      /////////////////////////////
+
       // set the time of the last end of melody
-      action_time = millis();
+      last_melody_time = millis();
       pressed = false;
     }
   } else {
     // if buttons not pressed play melody according to
     // the specified interval
     runMelody() {
+      ////// BuzzerMelody.h ///////
       play_random_melody();
+      /////////////////////////////
+
+      // set the time of the last end of melody
+      last_melody_time = millis();
     }
   }
 }
@@ -745,6 +751,4 @@ static void blink_red_led() {
 //    servo.write(i);
 //  }
 //}
-
-
 

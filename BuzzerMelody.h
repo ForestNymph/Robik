@@ -97,23 +97,41 @@ inline void set_pin(byte pin) {
   TONE_PIN = pin;
 }
 
-inline byte fake_rand(int val_start, int val_end){
-  Serial.println(analogRead(4));
-  Serial.println(analogRead(5));
-  Serial.println(analogRead(6));
-  Serial.println(analogRead(7));
-  Serial.println(analogRead(8));
-  unsigned long curr_time = micros();
-  while (curr_time >= val_end) {
-    curr_time /= 10;
+inline unsigned int PRNG() {
+  // our initial starting seed is 5323
+  static unsigned int seed = 5323;
+
+  // Take the current seed and generate a new value from it
+  // Due to our use of large constants and overflow, it would be
+  // very hard for someone to predict what the next number is
+  // going to be from the previous one.
+  seed = (8253729 * seed + 2396403);
+  // Take the seed and return a value between 0 and 32767
+  return seed % 32768;
+}
+
+inline byte random_number(int val_start, int val_end) {
+  unsigned int factor = PRNG();
+  unsigned int nr = factor;
+  // Serial.println(factor);
+  // get random generated number
+  // and find first instance of digit from the range
+  while (nr >= val_end) {
+    nr = factor % 10;
+    factor /= 10;
+
+    // if digits in number are grater than range number
+    // ex. range 0-8 and random number is 99999
+    if (factor < val_end) {
+      return 0;
+    }
   }
-  Serial.print("random: ");
-  Serial.println(curr_time);
-  return curr_time;
+  // Serial.println(nr);
+  return nr;
 }
 
 inline void play_random_melody() {
-  byte nr = fake_rand(0, 8);
+  byte nr = random_number(0, 8);
   strcpy_P(buffer, (char*)pgm_read_word(&(songs[nr])));
   play_rtttl(buffer);
 }
@@ -170,10 +188,10 @@ void play_rtttl(const char *p) {
     bpm = num;
     p++;  // skip colon
   }
-  
+
   // BPM usually expresses the number of quarter notes per minute
   wholenote = (60 * 1000L / bpm) * 4;  // this is the time for whole note (in milliseconds)
-  
+
   // now begin note loop
   while (*p) {
     // first, get note duration, if available

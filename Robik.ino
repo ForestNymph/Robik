@@ -513,7 +513,6 @@ static void play_melody() {
         ////// BuzzerMelody.h ///////
         play_random_melody();
         /////////////////////////////
-        Serial.println("bip1");
         // set the time of the last end of melody
         last_melody_time = millis();
         pressed = false;
@@ -525,7 +524,6 @@ static void play_melody() {
         ////// BuzzerMelody.h ///////
         play_random_melody();
         /////////////////////////////
-        Serial.println("bip2");
         // set the time of the last end of melody
         last_melody_time = millis();
       }
@@ -785,5 +783,4 @@ static void blink_red_led() {
 //    servo.write(i);
 //  }
 //}
-
 

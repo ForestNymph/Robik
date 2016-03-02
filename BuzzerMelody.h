@@ -97,6 +97,7 @@ inline void set_pin(byte pin) {
   TONE_PIN = pin;
 }
 
+// http://www.learncpp.com/cpp-tutorial/59-random-number-generation/
 inline unsigned int PRNG() {
   // our initial starting seed is 5323
   static unsigned int seed = 5323;
@@ -143,11 +144,11 @@ void play_rtttl(const char *p) {
   byte default_dur = 4;
   byte default_oct = 6;
   int bpm = 63;
-  int num;
-  long wholenote;
-  long duration;
-  byte note;
-  byte scale;
+  int num = 0;
+  long wholenote = 0;
+  long duration = 0;
+  byte note = 0;
+  byte scale = 0;
 
   // format: d=N,o=N,b=NNN:
   // find the start (skip name, etc)
@@ -170,8 +171,7 @@ void play_rtttl(const char *p) {
   }
 
   // get default octave
-  if (*p == 'o')
-  {
+  if (*p == 'o') {
     p++; p++; // skip "o="
     num = *p++ - '0';
     if (num >= 3 && num <= 7) default_oct = num;
@@ -260,6 +260,7 @@ void play_rtttl(const char *p) {
     // now play the note
     if (note) {
       tone(TONE_PIN, notes[(scale - 4) * 12 + note]);
+      Serial.println(notes[(scale - 4) * 12 + note]);
       delay(duration);
       noTone(TONE_PIN);
     } else {

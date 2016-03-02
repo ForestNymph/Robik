@@ -38,7 +38,7 @@ static PCF8574 expander;
 ///////// L298 MOTOR DRIVER /////////////////////////////
 
 // motor controller digital pins
-#define LEFT_ENGINE_SPEED 5
+#define LEFT_ENGINE_SPEED 9
 #define RIGHT_ENGINE_SPEED 9
 #define IN1 A0 // left
 #define IN2 8 // left
@@ -48,7 +48,7 @@ static PCF8574 expander;
 // different values for motors to work in the same way (same speed)
 // (cheap yellow dagu motors)
 static int motor_speed_left = 160;
-static int motor_speed_right = 159;
+static int motor_speed_right = 160;
 
 // struct describes configuration
 // like a motors direction
@@ -294,8 +294,8 @@ void setup() {
   pinMode(IN2, OUTPUT);
   pinMode(IN3, OUTPUT);
   pinMode(IN4, OUTPUT);
-  analogWrite(LEFT_ENGINE_SPEED, 0);
-  analogWrite(RIGHT_ENGINE_SPEED, 0);
+  analogWrite(LEFT_ENGINE_SPEED, LOW);
+  analogWrite(RIGHT_ENGINE_SPEED, LOW);
 
   if (robot_mode == remote_robik) {
 
@@ -481,29 +481,58 @@ static void check_IR_signal() {
 }
 
 static void play_melody() {
-  if (pressed) {
-    if (millis() >= pressed_time) {
-      ////// BuzzerMelody.h ///////
-      play_random_melody();
-      /////////////////////////////
 
-      // set the time of the last end of melody
-      last_melody_time = millis();
-      pressed = false;
+  if (debug) {
+    runEvery(1000) {
+      Serial.print("IN1: ");
+      Serial.println(analogRead(IN1));
+      Serial.print("IN2: ");
+      Serial.println(analogRead(IN2));
+      Serial.print("IN3: ");
+      Serial.println(analogRead(IN3));
+      Serial.print("IN4: ");
+      Serial.println(analogRead(IN4));
+      Serial.print("Left speed: ");
+      Serial.print("(");
+      Serial.print(LEFT_ENGINE_SPEED);
+      Serial.print(")");
+      Serial.println(analogRead(LEFT_ENGINE_SPEED));
+      Serial.print("Right speed: ");
+      Serial.print("(");
+      Serial.print(RIGHT_ENGINE_SPEED);
+      Serial.print(")");
+      Serial.println(analogRead(RIGHT_ENGINE_SPEED));
     }
-  } else {
-    // if buttons not pressed play melody according to
-    // the specified interval
-    runMelody() {
-      ////// BuzzerMelody.h ///////
-      play_random_melody();
-      /////////////////////////////
-
-      // set the time of the last end of melody
-      last_melody_time = millis();
+  }
+  // checking wheather Robic does not move
+  // If Robic is in motion melody will not play
+  // In this case, just check one engine
+  if (analogRead(IN3) == LOW && digitalRead(IN4) == LOW) {
+    if (pressed) {
+      if (millis() >= pressed_time) {
+        ////// BuzzerMelody.h ///////
+        play_random_melody();
+        /////////////////////////////
+        Serial.println("bip1");
+        // set the time of the last end of melody
+        last_melody_time = millis();
+        pressed = false;
+      }
+    } else {
+      // if buttons not pressed play melody according to
+      // the specified interval
+      runMelody() {
+        ////// BuzzerMelody.h ///////
+        play_random_melody();
+        /////////////////////////////
+        Serial.println("bip2");
+        // set the time of the last end of melody
+        last_melody_time = millis();
+      }
     }
   }
 }
+
 
 static void set_pressed_config() {
   pressed_time = millis() + time_delay;
@@ -572,6 +601,11 @@ static long convert_micorsec_to_centimeters(long microseconds) {
   return microseconds / 29 / 2;
 }
 
+/*#define IN1 A0 // left
+  #define IN2 8 // left
+  #define IN3 A1 // right
+  #define IN4 4 // right*/
+
 static void run_motors(motors_config* conf) {
   digitalWrite(IN1, (*conf).in1);
   digitalWrite(IN3, (*conf).in3);
@@ -581,8 +615,8 @@ static void run_motors(motors_config* conf) {
 
   // stop with state HIGH for PWM's is "fast brake"
   if ((*conf).fast_break) {
-    analogWrite(LEFT_ENGINE_SPEED, HIGH);
-    analogWrite(RIGHT_ENGINE_SPEED, HIGH);
+    analogWrite(LEFT_ENGINE_SPEED, LOW);
+    analogWrite(RIGHT_ENGINE_SPEED, LOW);
   } else {
     analogWrite(LEFT_ENGINE_SPEED, motor_speed_left);
     analogWrite(RIGHT_ENGINE_SPEED, motor_speed_right);
@@ -751,4 +785,5 @@ static void blink_red_led() {
 //    servo.write(i);
 //  }
 //}
+
 
